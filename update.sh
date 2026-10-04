@@ -5,6 +5,8 @@
 #
 #   ./update.sh            # merge origin/main, then build + sign
 #   ./update.sh --no-pull  # just rebuild + sign the current checkout
+#   ./update.sh --dev      # just rebuild and copy dist/ to Windows (no signing): load it
+#                          # as a temporary add-on (about:debugging) and press Reload
 #
 # Needs AMO API keys in ~/.config/amo.env (AMO_JWT_ISSUER / AMO_JWT_SECRET).
 set -euo pipefail
@@ -20,7 +22,8 @@ export NVM_DIR="$HOME/.nvm"
 NODE_BIN="$(nvm which 24)"
 export PATH="$(dirname "$NODE_BIN"):$PATH"
 
-if [ "${1:-}" != "--no-pull" ]; then
+MODE="${1:-}"
+if [ "$MODE" != "--no-pull" ] && [ "$MODE" != "--dev" ]; then
   if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
     echo "ERROR: uncommitted changes; commit or stash them first." >&2
     exit 1
@@ -47,11 +50,19 @@ pnpm build
 # Re-register the bridge in case host.js or the node path changed (idempotent).
 CLAUDEMONKEY_NODE_BIN="$NODE_BIN" bash bridge/install.sh
 
+if [ "$MODE" = "--dev" ]; then
+  rm -rf "$WIN_DIR/dist"
+  cp -r dist "$WIN_DIR/dist"
+  echo
+  echo "Dev build copied to $WIN_DIR/dist — press Reload on Clawdify in about:debugging."
+  exit 0
+fi
+
 set -a
 # shellcheck disable=SC1091
 . "$HOME/.config/amo.env"
 set +a
-npx -y web-ext@latest sign --source-dir=dist --channel=unlisted \
+pnpm exec web-ext sign --source-dir=dist --channel=unlisted \
   --artifacts-dir=web-ext-artifacts \
   --api-key="$AMO_JWT_ISSUER" --api-secret="$AMO_JWT_SECRET"
 
