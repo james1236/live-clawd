@@ -56,7 +56,7 @@ npx -y web-ext@latest sign --source-dir=dist --channel=unlisted \
   --api-key="$AMO_JWT_ISSUER" --api-secret="$AMO_JWT_SECRET"
 
 XPI="$(ls -t web-ext-artifacts/*.xpi | head -1)"
-OUT="$WIN_DIR/claudemonkey-$VERSION-signed.xpi"
+OUT="$WIN_DIR/clawdify-$VERSION.xpi"
 cp "$XPI" "$OUT"
 echo
 echo "Signed XPI: $OUT"

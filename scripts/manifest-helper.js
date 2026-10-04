@@ -24,7 +24,7 @@ function buildManifest(base) {
   }
   if (isBeta()) {
     // Do not support i18n in beta version
-    const name = 'ClaudeMonkey BETA';
+    const name = 'Clawdify';
     data.name = name;
     data.browser_action.default_title = name;
   }
