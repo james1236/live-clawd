@@ -12,7 +12,7 @@
  * can confirm the change worked or fix it — up to MAX_VERIFY_ROUNDS times.
  */
 import { sendCmd, getActiveTab } from '@/common';
-import { addOwnCommands } from './init';
+import { addOwnCommands, addPublicCommands } from './init';
 import storage, { S_CODE } from './storage';
 import { getScripts, parseScript } from './db';
 import { classifyTool } from '@/common/clawd-actions';
@@ -473,6 +473,11 @@ addOwnCommands({
     return c == null ? null : c;
   },
 
+  /** Whether a Clawd is currently on that tab's page. */
+  ClawdOnPage({ tabId } = {}) {
+    return onPage.has(tabId);
+  },
+
   AIWatchDelete({ id } = {}) {
     return deleteWatch(String(id));
   },
@@ -823,8 +828,44 @@ export async function clawdNow(tabId, msg) {
   try {
     await browser.tabs.executeScript(tabId, { file: '/clawd-overlay.js' });
     await browser.tabs.executeScript(tabId, { code: `window.__cmClawd && window.__cmClawd(${JSON.stringify(msg)}); 0` });
+    if (/^(act|done|error)$/.test(msg.op)) setPresence(tabId, msg.id || 'job', true);
+    else if (msg.op === 'hide' && msg.final) setPresence(tabId, null, false);
   } catch { /* restricted page, closed tab, ... */ }
 }
+
+// Which Clawds are on which tab's page. The sidebar hides its own Clawd (he "portals
+// out" into the page) while one is there; the overlay reports when he leaves.
+/** @type {Map<number, Set<string>>} */
+const onPage = new Map();
+const dismissListeners = [];
+
+function setPresence(tabId, id, present) {
+  if (tabId == null) return;
+  const set = onPage.get(tabId) || new Set();
+  const before = set.size > 0;
+  if (id == null) set.clear();
+  else if (present) set.add(id);
+  else set.delete(id);
+  if (set.size) onPage.set(tabId, set); else onPage.delete(tabId);
+  if (before !== set.size > 0) sendCmd('ClawdPresence', { tabId, present: set.size > 0 });
+}
+
+/** Called with (tabId, id) when the user clicks a waving Clawd away. */
+export const onClawdDismissed = fn => dismissListeners.push(fn);
+
+browser.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status === 'loading') setPresence(tabId, null, false); // the page (and Clawd) is gone
+});
+browser.tabs.onRemoved.addListener(tabId => setPresence(tabId, null, false));
+
+addPublicCommands({
+  /** From the overlay: a Clawd finished leaving the page (dismissed = clicked away). */
+  ClawdGone({ id, dismissed } = {}, src) {
+    const tabId = src && src.tab && src.tab.id;
+    setPresence(tabId, String(id), false);
+    if (dismissed) dismissListeners.forEach(fn => fn(tabId, String(id)));
+  },
+});
 
 function broadcastNote(job, text) {
   // 'note' = Clawdify's own progress line, rendered apart from Claude's narration.

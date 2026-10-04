@@ -47,12 +47,17 @@ function install() {
   width: ${10 * UNIT}px; height: ${10 * UNIT}px; pointer-events: auto; cursor: pointer; }
 /* portal-gun entrances and exits: he rises out of / sinks into a swirling green portal */
 .portal { position: absolute; left: ${FOOT_X - 44}px; top: ${FOOT_Y - 9}px; width: 88px; height: 20px; border-radius: 50%;
-  background: radial-gradient(ellipse at center, #f2ffe0 0 16%, #9be35a 38%, #39a83a 62%, rgba(40,140,40,0) 72%);
-  box-shadow: 0 0 16px 5px rgba(130,230,90,.6); transform: scale(0, .3); opacity: 0; overflow: hidden;
+  background: radial-gradient(ellipse at center, #fff3dc 0 16%, #ffb347 38%, #ff7a00 62%, rgba(255,122,0,0) 72%);
+  box-shadow: 0 0 16px 5px rgba(255,140,0,.6); transform: scale(0, .3); opacity: 0; overflow: hidden;
   transition: transform .28s cubic-bezier(.3, 1.6, .6, 1), opacity .2s; }
 .portal::after { content: ""; position: absolute; inset: 2px 6px; border-radius: 50%;
   background: conic-gradient(rgba(255,255,255,.7), transparent 30%, rgba(255,255,255,.45) 55%, transparent 80%); animation: spin .5s linear infinite; }
 .portal.open { transform: scale(1, 1); opacity: 1; }
+/* Blue to leave, orange to arrive. */
+.portal.blue { background: radial-gradient(ellipse at center, #e3f1ff 0 16%, #63b3ff 38%, #1f6fff 62%, rgba(31,111,255,0) 72%);
+  box-shadow: 0 0 16px 5px rgba(50,140,255,.6); }
+.shot { position: absolute; left: 0; top: 0; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%;
+  background: #e3f1ff; box-shadow: 0 0 6px 3px #3d8bff, 0 0 14px 6px rgba(61,139,255,.5); transition: transform .18s linear; }
 .sprite.emerging .clip, .sprite.sinking .clip { clip-path: inset(-300px -300px ${SPRITE_H - FOOT_Y}px -300px); }
 @keyframes emerge { from { transform: translateY(${Math.round(FOOT_Y)}px); } to { transform: none; } }
 @keyframes sink { from { transform: none; } to { transform: translateY(${Math.round(FOOT_Y + 8)}px); } }
@@ -196,11 +201,33 @@ ${CLAWD_CSS}`;
     };
     const stop = e => { e.stopPropagation(); e.preventDefault(); };
     hit.addEventListener('mousedown', stop);
-    hit.addEventListener('click', e => { stop(e); tickle(c); });
+    hit.addEventListener('click', e => {
+      stop(e);
+      // A Clawd waving for attention is dismissed by a click (until Claude has news).
+      if (c.actMood === 'wave' && !c.leaving) {
+        c.dismissed = true;
+        c.action = null;
+        c.actMood = 'idle';
+        setLabel(c, 'OK, I’ll wait 👍');
+        clearTimeout(c.leaveTimer);
+        c.leaveTimer = setTimeout(() => leave(c), 700);
+      } else {
+        tickle(c);
+      }
+    });
     // Later Clawds stand a little to the side so they don't stack exactly.
     c.offset = (clawds.size % 3) * 40;
     clawds.set(id, c);
     return c;
+  }
+
+  /** Tell the extension a Clawd has left this page (so the sidebar can have him back). */
+  function reportGone(c) {
+    try {
+      if (typeof browser !== 'undefined') {
+        browser.runtime.sendMessage({ cmd: 'ClawdGone', data: { id: c.id, dismissed: !!c.dismissed } }).catch(() => {});
+      }
+    } catch { /* not in an extension (tests) */ }
   }
 
   function removeClawd(c) {
@@ -208,6 +235,7 @@ ${CLAWD_CSS}`;
     c.root.remove();
     c.hl.remove();
     clawds.delete(c.id);
+    reportGone(c);
     if (!clawds.size) hideAll();
   }
 
@@ -415,7 +443,9 @@ ${CLAWD_CSS}`;
     c.phase = 'in';
     c.phaseAt = now;
     c.root.classList.add('emerging');
+    c.portal.classList.remove('blue');
     c.portal.classList.add('open');
+    c.svg.style.setProperty('--portal', '#ff8a1f');
   }
 
   /** Portal out (he sinks into it), then vanish or reappear at his destination. */
@@ -423,7 +453,27 @@ ${CLAWD_CSS}`;
     c.phase = 'out';
     c.phaseAt = now;
     c.then = then;
-    c.portal.classList.add('open');
+    c.fired = false;
+    c.svg.style.setProperty('--portal', '#2f8cff');
+  }
+
+  /** The portal gun's muzzle after he aims it down, in viewport px. */
+  function muzzle(c) {
+    const flip = c.turn.classList.contains('flip');
+    const mx = (19.4 - VIEWBOX.x) * UNIT;
+    return { x: c.pos.x + (flip ? SPRITE_W - mx : mx), y: c.pos.y + (7 - VIEWBOX.y) * UNIT };
+  }
+
+  /** A blue blob flying from the gun to where the portal will open (under his feet). */
+  function fire(c) {
+    const from = muzzle(c);
+    const shot = el('div', 'shot', layer);
+    shot.style.transform = `translate(${from.x}px, ${from.y}px)`;
+    const to = { x: c.pos.x + FOOT_X, y: c.pos.y + FOOT_Y };
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      shot.style.transform = `translate(${to.x}px, ${to.y}px) scale(.6)`;
+    }));
+    setTimeout(() => shot.remove(), 230);
   }
 
   /** Advance a portal animation; returns false if the Clawd is gone. */
@@ -431,11 +481,14 @@ ${CLAWD_CSS}`;
     const t = now - c.phaseAt;
     if (c.phase === 'in') {
       if (t > 650) c.portal.classList.remove('open');
-      if (t > 850) { c.phase = null; c.root.classList.remove('emerging'); }
+      if (t > 1000) { c.phase = null; c.root.classList.remove('emerging'); }
     } else {
-      if (t > 160) c.root.classList.add('sinking');
-      if (t > 640) c.portal.classList.remove('open');
-      if (t > 860) {
+      // Aim the portal gun down, fire, blue portal opens, drop in.
+      if (t > 260 && !c.fired) { c.fired = true; fire(c); }
+      if (t > 440) c.portal.classList.add('blue', 'open');
+      if (t > 580) c.root.classList.add('sinking');
+      if (t > 1060) c.portal.classList.remove('open');
+      if (t > 1280) {
         c.root.classList.remove('sinking');
         if (c.then === 'remove') { removeClawd(c); return false; }
         c.pos = { ...dest };
@@ -482,7 +535,8 @@ ${CLAWD_CSS}`;
     if (c.leaving && !c.phase) startOut(c, now, 'remove');
     if (c.phase) {
       if (!stepPhase(c, now, dest)) return;
-      show(c, c.phase === 'in' ? 'idle' : c.mood, now);
+      // Arrives holding the portal gun; aims it to leave until he's dropping through.
+      show(c, 'portal', now);
       c.root.style.transform = `translate(${Math.round(c.pos.x)}px, ${Math.round(c.pos.y)}px)`;
       placeLabel(c);
       placeHighlight(c, now);

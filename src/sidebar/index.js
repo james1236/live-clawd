@@ -55,7 +55,21 @@ body { display: flex; flex-direction: column; user-select: text; }
 .box .cm-input { flex: 1; min-height: 30px; max-height: 200px; overflow: auto; padding: 6px 4px 6px 8px; border: 0; border-radius: 0; box-shadow: none; background: transparent; line-height: 18px; }
 .send { flex: none; width: 30px; height: 30px; padding: 0; border-radius: 8px; display: grid; place-items: center; }
 .stage { position: relative; display: flex; align-items: flex-end; gap: 10px; padding: 8px 12px 4px; border-top: 1px solid var(--border); background: linear-gradient(var(--bg), var(--surface-2)); }
-.mascot { flex: none; width: 112px; cursor: pointer; user-select: none; }
+.mascot { position: relative; flex: none; width: 112px; height: 82px; cursor: pointer; user-select: none; }
+.mclip, .mface { position: absolute; inset: 0; }
+/* portals on the stage: blue when he leaves for the page, orange when he comes back */
+.mport { position: absolute; left: 14px; bottom: -6px; width: 84px; height: 18px; border-radius: 50%; transform: scale(0, .3); opacity: 0;
+  transition: transform .28s cubic-bezier(.3, 1.6, .6, 1), opacity .2s; overflow: hidden;
+  background: radial-gradient(ellipse at center, #fff3dc 0 16%, #ffb347 38%, #ff7a00 62%, rgba(255,122,0,0) 72%); box-shadow: 0 0 14px 4px rgba(255,140,0,.55); }
+.mport.blue { background: radial-gradient(ellipse at center, #e3f1ff 0 16%, #63b3ff 38%, #1f6fff 62%, rgba(31,111,255,0) 72%); box-shadow: 0 0 14px 4px rgba(50,140,255,.55); }
+.mport.open { transform: scale(1, 1); opacity: 1; }
+.mascot.moving .mclip { clip-path: inset(-200px -200px 4px -200px); }
+@keyframes m-sink { to { transform: translateY(84px); } }
+@keyframes m-rise { from { transform: translateY(84px); } to { transform: none; } }
+.mascot.sinking .mface { animation: m-sink .45s ease-in forwards; }
+.mascot.rising .mface { animation: m-rise .5s cubic-bezier(.2, .9, .3, 1.2) .2s both; }
+.mascot.away .mface { visibility: hidden; }
+.mascot.away { cursor: default; }
 .speech { position: relative; flex: 0 1 auto; min-width: 0; margin-bottom: 30px; padding: 7px 11px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
 .speech::before { content: ""; position: absolute; left: -6px; bottom: 10px; width: 10px; height: 10px; background: var(--surface); border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); transform: rotate(45deg); }
 .waterc { position: absolute; right: 12px; top: 6px; font-size: 11px; color: #3a7bd5; }
@@ -99,7 +113,7 @@ document.body.innerHTML = `
   <div class="watches" id="watches"></div>
   <div class="log" id="log"></div>
   <div class="stage">
-    <div class="mascot" id="mascot" title="Click to tickle">${clawdSpriteHtml(112)}</div>
+    <div class="mascot" id="mascot" title="Click to tickle"><div class="mport" id="mport"></div><div class="mclip"><div class="mface">${clawdSpriteHtml(112)}</div></div></div>
     <div class="speech" id="speech">Hi!</div>
     <div class="waterc" id="waterc" title="Water guzzled so far (it's a joke)"></div>
   </div>
@@ -156,11 +170,13 @@ function showWater() {
 showWater();
 
 function paintStage() {
+  if (mascotEl.classList.contains('moving')) return; // mid-portal
   const now = Date.now();
   const drinking = waterUntil > now;
   const mood = drinking ? 'water' : throwUntil > now ? 'throw' : stageMood;
   setMood(spriteEl, mood, tickleUntil > now ? 'cw-tickle' : '');
-  $('speech').textContent = tickleUntil > now ? tickleText : drinking ? MOOD_LABEL.water : stageText;
+  $('speech').textContent = away ? `On the page → ${stageText}`
+    : tickleUntil > now ? tickleText : drinking ? MOOD_LABEL.water : stageText;
 }
 
 function setStage(mood, text, color) {
@@ -172,6 +188,7 @@ function setStage(mood, text, color) {
 
 // Click to tickle him.
 mascotEl.addEventListener('click', () => {
+  if (away) return;
   const now = Date.now();
   if (now - lastTickle > 3000) tickles = 0;
   lastTickle = now;
@@ -466,8 +483,53 @@ function refresh() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Clawd is in one place at a time: when he's out on the page, he portals out of here.
+// ---------------------------------------------------------------------------
+let tabId = null;
+let away = false;
+let awayTimers = [];
+
+function setAway(on) {
+  if (on === away) return;
+  away = on;
+  const m = mascotEl;
+  const port = $('mport');
+  awayTimers.forEach(clearTimeout);
+  m.classList.remove('sinking', 'rising', 'moving');
+  // Nobody's looking at the sidebar: just switch, no show.
+  if (document.visibilityState !== 'visible') {
+    m.classList.toggle('away', on);
+    port.classList.remove('open');
+    paintStage();
+    return;
+  }
+  const later = (ms, fn) => awayTimers.push(setTimeout(fn, ms));
+  m.classList.add('moving');
+  if (on) {
+    setMood(spriteEl, 'portal');
+    later(260, () => { port.classList.add('blue', 'open'); });
+    later(420, () => m.classList.add('sinking'));
+    later(900, () => { port.classList.remove('open'); m.classList.add('away'); m.classList.remove('sinking', 'moving'); paintStage(); });
+  } else {
+    port.classList.remove('blue');
+    port.classList.add('open');
+    m.classList.remove('away');
+    m.classList.add('rising');
+    setMood(spriteEl, 'portal');
+    later(700, () => port.classList.remove('open'));
+    later(950, () => { m.classList.remove('rising', 'moving'); paintStage(); });
+  }
+}
+
+async function checkAway() {
+  try { setAway(!!(tabId != null && await sendCmdDirectly('ClawdOnPage', { tabId }))); } catch { /* ignore */ }
+}
+
 async function followTab() {
   const tab = (await browser.tabs.query({ active: true, windowId }))[0];
+  tabId = tab ? tab.id : null;
+  checkAway();
   const next = siteOf(tab && tab.url);
   tabUrl = (tab && tab.url) || '';
   if (next !== domain) {
@@ -480,11 +542,12 @@ async function followTab() {
 
 browser.runtime.onMessage.addListener(msg => {
   if (msg && msg.cmd === 'AIEvent') refresh();
+  else if (msg && msg.cmd === 'ClawdPresence' && msg.data && msg.data.tabId === tabId) setAway(!!msg.data.present);
 });
 browser.tabs.onActivated.addListener(info => {
   if (info.windowId === windowId) followTab();
 });
-browser.tabs.onUpdated.addListener((tabId, info, tab) => {
+browser.tabs.onUpdated.addListener((_id, info, tab) => {
   if (tab.windowId === windowId && tab.active && info.url) followTab();
 });
 

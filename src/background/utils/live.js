@@ -7,7 +7,7 @@
  * Only the visible tab of each window is animated, one Clawd per Claude session.
  */
 import { addOwnCommands } from './init';
-import { busyTabIds, clawdNow } from './ai';
+import { busyTabIds, clawdNow, onClawdDismissed } from './ai';
 import { classifyChange, classifyTool, MOOD_LABEL } from '@/common/clawd-actions';
 
 const HOST_NAME = 'claudemonkey.bridge';
@@ -159,6 +159,15 @@ async function replay(tab) {
   }
 }
 
+// Clicked away while waving: don't bring him back until Claude has something new.
+onClawdDismissed((tabId, id) => {
+  if (!id.startsWith('live:')) return;
+  const s = sessions.get(id.slice(5));
+  if (s && s.last && s.last.kind === 'wave') s.last = null;
+  const lane = lanes.get(`${tabId}|${id}`);
+  if (lane) lane.pending = [];
+});
+
 browser.tabs.onActivated.addListener(async ({ tabId }) => {
   try { replay(await browser.tabs.get(tabId)); } catch { /* closed */ }
 });
@@ -174,7 +183,7 @@ async function setEnabled(enabled) {
   await save();
   if (settings.enabled) { retryMs = 5000; connect(); } else {
     disconnect();
-    for (const t of await browser.tabs.query({})) if (originOf(t.url)) clawdNow(t.id, { op: 'hide' });
+    for (const t of await browser.tabs.query({})) if (originOf(t.url)) clawdNow(t.id, { op: 'hide', final: true });
   }
 }
 
