@@ -14,6 +14,10 @@
  *   4. relay the streamed events back to the extension and, on completion,
  *      send the final userscript text back for installation.
  *
+ * While it runs, `claude` also gets the "clawdify" MCP tools (mcp-browser.js). Tab tools
+ * are relayed to the extension, which runs each one only after the user presses
+ * Approve in the sidebar; save_output writes under ~/Clawdify/outputs.
+ *
  * {type:"live-subscribe"} turns this process into the Live Clawd relay instead: it
  * heartbeats ~/.claudemonkey/live/alive and forwards events that live-hook.sh (a
  * Claude Code hook) spools while Claude works on a project with a local dev server.
@@ -24,6 +28,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
+const net = require('net');
 const readline = require('readline');
 
 const HOME = os.homedir();
@@ -34,6 +39,12 @@ const BASE = path.join(HOME, '.claudemonkey', 'sites');
 // the log dir, not the per-site working dirs.
 const FEEDBACK_DIR = path.join(HOME, '.claudemonkey', 'logs');
 const FEEDBACK_PATH = path.join(FEEDBACK_DIR, 'feedback.md');
+// Files Claude produces for the user (CSV exports, reports, ...), per site.
+const OUTPUT_DIR = path.join(HOME, 'Clawdify', 'outputs');
+// Per-request sockets + MCP configs connecting `claude` to the browser tools.
+const RUN_DIR = path.join(HOME, '.claudemonkey', 'run');
+// Host-to-extension native messages are capped at 1 MB; stay well under it.
+const MAX_INLINE_OUTPUT = 700 * 1024;
 // Live Clawd: Claude Code hooks drop events here while Firefox is listening.
 const LIVE_DIR = path.join(HOME, '.claudemonkey', 'live');
 const SPOOL_DIR = path.join(LIVE_DIR, 'spool');
@@ -123,7 +134,21 @@ function scaffold(domain) {
 `;
 }
 
-const SYSTEM = `You are ClaudeMonkey, maintaining a single Violentmonkey userscript for the website __DOMAIN__.
+const SYSTEM = `You are Clawdify: Claude working from the user's Firefox sidebar, about the tab they have open on __DOMAIN__. You maintain a Violentmonkey userscript for the site, and you also have "clawdify" tools.
+
+Decide what the request actually needs — often it is NOT a userscript:
+- A lasting change to how the site looks or behaves (on every visit) → edit userscript.user.js. It is installed, the page reloaded and your change verified automatically.
+- A question about the page → answer it from the snapshot files on disk.
+- An output the user wants to keep (CSV, JSON, markdown, a list, a report) → build it from the snapshot files and save it with save_output, then name the file in your reply.
+- A one-off task in the live tab (click, fill, navigate, read what's there now, step through pages) → the tab tools: page_snapshot, page_info, page_eval, click, type, navigate, reload, wait_for, screenshot.
+- Something recurring ("every minute check X", "tell me when Y changes") → watch_create with a snippet that returns a short status.
+- notify pops a desktop notification (e.g. when a long task finishes).
+
+IMPORTANT — the user approves every tab tool call (and every new watch) by pressing a button in the sidebar; nothing touches their tab otherwise. A denial means "don't": respect it, don't retry the same thing, and say what you would have needed. So:
+- Prefer the snapshot files already on disk; reach for tab tools only when the task really needs the live tab.
+- Make few, purposeful calls — e.g. one page_eval that extracts everything, rather than many small reads.
+- Give each call a short "reason" (shown to the user on the approval button).
+Only edit userscript.user.js when the user wants a lasting change; leave it untouched otherwise.
 
 Your current working directory contains:
 - userscript.user.js  — THE userscript. Edit THIS file to fulfil the user's request.
@@ -147,12 +172,18 @@ Rules:
 - Do NOT run a dev server, git, package managers, or other shell commands. Use Read/Grep to inspect page-context.md, page-dom.html, page-dom-styled.html and assets/*, and Read/Edit/Write for userscript.user.js.
 - The one allowed shell command is curl: use it to fetch external resources when you genuinely need them — e.g. library/API docs, a CDN URL for a dependency you want to @require, or a resource the page loads that isn't already in assets/. curl returns the full response (headers/<head> included), unlike the stripped DOM snapshots. Prefer the on-disk DOM/assets first; reach for curl only when they don't answer the question.
 - If anything made this job harder than it should be (missing/insufficient context, a stripped resource you needed, a tool you lacked, confusing instructions, a dead end), append a short, specific note to the shared feedback log at __FEEDBACK_PATH__ — Read it, then Write it back with your entry added under a new heading. Only log genuine friction, and keep it out of your reply to the user. See page-context.md for the exact format.
-- When done, leave userscript.user.js complete and valid, and briefly explain what you changed.`;
+- The tab is the user's real, logged-in session: never buy, send, post, delete or change account settings unless the request explicitly asks for exactly that.
+- When done, briefly say what you did (and, if you edited it, leave userscript.user.js complete and valid).`;
 
 function handleMessage(msg) {
   if (!msg || typeof msg !== 'object') return;
   if (msg.type === 'ping') {
     sendMessage({ type: 'pong', requestId: msg.requestId, claudeBin: CLAUDE_BIN, claudeConfigDir: CLAUDE_CONFIG_DIR || undefined });
+    return;
+  }
+  if (msg.type === 'browser-result') {
+    const p = pendingCalls.get(`${msg.requestId}:${msg.callId}`);
+    if (p) p(msg);
     return;
   }
   if (msg.type === 'live-subscribe') {
@@ -177,7 +208,13 @@ function summarizeTool(c) {
     case 'Read': return `Read ${file || 'file'}`;
     case 'Grep': return input.pattern ? `Searched DOM for "${String(input.pattern).slice(0, 60)}"` : 'Searched DOM';
     case 'Bash': return input.command ? `Ran \`${String(input.command).slice(0, 80)}\`` : 'Ran a command';
-    default: return c.name;
+    default:
+      if (/^mcp__clawdify__/.test(c.name)) {
+        const t = c.name.slice(15).replace(/_/g, ' ');
+        const what = input.selector || input.url || input.filename || input.name || '';
+        return `${t}${what ? ` ${String(what).slice(0, 60)}` : ''}`;
+      }
+      return c.name;
   }
 }
 
@@ -195,7 +232,110 @@ function toolDetail(c) {
   else if (c.name === 'Grep') d = input.pattern;
   else if (c.name === 'Read') d = input.file_path ? path.basename(input.file_path) : '';
   else if (c.name === 'Bash') d = input.command;
+  else if (/^mcp__clawdify__/.test(c.name)) d = input.selector || input.url || input.filename || input.name || input.code || '';
   return String(d || '').slice(0, 8000);
+}
+
+// ----------------------------------------------------------------------------
+// Clawdify tools: `claude` <-> mcp-browser.js <-(unix socket)-> here <-> extension.
+// Every tab tool waits in the extension for the user's Approve click.
+// ----------------------------------------------------------------------------
+/** @type {Map<string, function>} "requestId:callId" -> resolver for the extension's reply */
+const pendingCalls = new Map();
+// Approval can take a while; stay under the stall watchdog so a slow click isn't a "stall".
+const TOOL_TIMEOUT_MS = Math.max(30000, Math.min(270000, (STALL_TIMEOUT_MS || 300000) - 20000));
+
+function winPathOf(p) {
+  const distro = process.env.WSL_DISTRO_NAME;
+  return distro ? `\\\\wsl.localhost\\${distro}${p.replace(/\//g, '\\')}` : p;
+}
+
+function safeFileName(name) {
+  const base = path.basename(String(name || 'output.txt')).replace(/[^\w.\- ]/g, '_').slice(0, 100);
+  return base && !/^\.+$/.test(base) ? base : 'output.txt';
+}
+
+function askExtension(requestId, callId, tool, args) {
+  return new Promise(resolve => {
+    const key = `${requestId}:${callId}`;
+    const timer = setTimeout(() => {
+      pendingCalls.delete(key);
+      resolve({ error: `No answer from the browser for ${tool} within ${Math.round(TOOL_TIMEOUT_MS / 1000)}s.` });
+    }, TOOL_TIMEOUT_MS);
+    pendingCalls.set(key, reply => {
+      clearTimeout(timer);
+      pendingCalls.delete(key);
+      resolve(reply);
+    });
+    sendMessage({ type: 'browser-call', requestId, callId, tool, args });
+  });
+}
+
+/** One tool call from mcp-browser.js. Resolves with {text} or {error}. */
+async function runTool(msg, dir, { id, tool, args = {} }) {
+  const requestId = msg.requestId;
+  if (tool === 'save_output') {
+    const name = safeFileName(args.filename);
+    const outDir = path.join(OUTPUT_DIR, safeDomain(msg.domain));
+    fs.mkdirSync(outDir, { recursive: true });
+    const file = path.join(outDir, name);
+    const content = String(args.content == null ? '' : args.content);
+    fs.writeFileSync(file, content);
+    const size = Buffer.byteLength(content);
+    sendMessage({
+      type: 'output', requestId, name, path: file, winPath: winPathOf(file), size,
+      content: size <= MAX_INLINE_OUTPUT ? content : undefined,
+    });
+    return { text: `Saved ${size} bytes to ${file}. The user can download it from the Clawdify sidebar.` };
+  }
+  const reply = await askExtension(requestId, id, tool, args);
+  if (reply.error) return { error: String(reply.error) };
+  const r = reply.result;
+  if (tool === 'page_snapshot' && r && typeof r === 'object') {
+    const file = path.join(dir, 'page-live.html');
+    fs.writeFileSync(file, r.html || '');
+    const text = String(r.text || '');
+    return {
+      text: `URL: ${r.url}\nTitle: ${r.title}\nFull HTML (${(r.html || '').length} chars) written to ${file} — Grep/Read it for structure.\n\nVisible text${text.length > 20000 ? ' (first 20000 chars)' : ''}:\n${text.slice(0, 20000)}`,
+    };
+  }
+  if (tool === 'screenshot' && r && r.png) {
+    const file = path.join(dir, 'page-screenshot-live.png');
+    fs.writeFileSync(file, Buffer.from(r.png, 'base64'));
+    return { text: `Screenshot of the visible tab saved to ${file}. Read it to see it.` };
+  }
+  return { text: typeof r === 'string' ? r : JSON.stringify(r, null, 1) };
+}
+
+/** Listen for mcp-browser.js on a per-request socket; returns the --mcp-config path. */
+function startToolServer(msg, dir) {
+  fs.mkdirSync(RUN_DIR, { recursive: true, mode: 0o700 });
+  const id = String(msg.requestId || Date.now()).replace(/[^a-zA-Z0-9-]/g, '').slice(0, 40);
+  const sock = path.join(RUN_DIR, `${id}.sock`);
+  const cfg = path.join(RUN_DIR, `${id}.mcp.json`);
+  try { fs.unlinkSync(sock); } catch { /* none */ }
+  const server = net.createServer(conn => {
+    conn.on('error', () => {});
+    readline.createInterface({ input: conn }).on('line', line => {
+      let req;
+      try { req = JSON.parse(line); } catch { return; }
+      runTool(msg, dir, req)
+        .catch(e => ({ error: String((e && e.message) || e) }))
+        .then(res => { try { conn.write(`${JSON.stringify({ id: req.id, ...res })}\n`); } catch { /* gone */ } });
+    });
+  });
+  server.on('error', () => {});
+  server.listen(sock, () => { try { fs.chmodSync(sock, 0o600); } catch { /* ignore */ } });
+  fs.writeFileSync(cfg, JSON.stringify({
+    mcpServers: { clawdify: { command: process.execPath, args: [path.join(__dirname, 'mcp-browser.js'), sock] } },
+  }));
+  return {
+    cfg,
+    close() {
+      server.close();
+      for (const f of [sock, cfg]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+    },
+  };
 }
 
 // ----------------------------------------------------------------------------
@@ -484,12 +624,16 @@ routine successes — and it is separate from your reply to the user.
   const sys = SYSTEM
     .replace(/__DOMAIN__/g, msg.domain || domain)
     .replace(/__FEEDBACK_PATH__/g, FEEDBACK_PATH);
+  const tools = startToolServer(msg, dir);
   const args = [
     '-p', msg.prompt || 'Improve the userscript for this site.',
     '--output-format', 'stream-json',
     '--verbose',
     '--permission-mode', 'acceptEdits',
-    '--allowedTools', 'Read,Grep,Edit,Write,Bash(curl:*)',
+    '--allowedTools', 'Read,Grep,Edit,Write,Bash(curl:*),mcp__clawdify',
+    // Only our tools: the user's own MCP servers stay out of these runs.
+    '--mcp-config', tools.cfg,
+    '--strict-mcp-config',
     // Expose only the log dir (not the per-site working dirs) so Claude can write
     // the shared feedback log, which lives outside its cwd.
     '--add-dir', FEEDBACK_DIR,
@@ -507,6 +651,7 @@ routine successes — and it is separate from your reply to the user.
   try {
     child = spawn(CLAUDE_BIN, args, { cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (e) {
+    tools.close();
     sendMessage({ type: 'done', requestId, error: `Failed to launch claude (${CLAUDE_BIN}): ${e.message}` });
     return;
   }
@@ -530,6 +675,7 @@ routine successes — and it is separate from your reply to the user.
     if (replied) return;
     replied = true;
     clearTimeout(stallTimer);
+    tools.close();
     let script = null;
     try { script = fs.readFileSync(scriptPath, 'utf8'); } catch {}
     writeRunLog(msg, domain, state, { script, exitCode: code, error });

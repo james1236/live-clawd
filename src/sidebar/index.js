@@ -60,6 +60,29 @@ body { display: flex; flex-direction: column; user-select: text; }
 .speech::before { content: ""; position: absolute; left: -6px; bottom: 10px; width: 10px; height: 10px; background: var(--surface); border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); transform: rotate(45deg); }
 .waterc { position: absolute; right: 12px; top: 6px; font-size: 11px; color: #3a7bd5; }
 .waterc:empty { display: none; }
+.ask { margin: 4px 0 12px; padding: 10px 12px; border-radius: 12px; border: 1.5px solid var(--accent); background: var(--surface); box-shadow: var(--shadow); }
+.ask.done { border-color: var(--border); box-shadow: none; opacity: .8; }
+.ask-h { font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--accent); margin-bottom: 4px; }
+.ask.done .ask-h { color: var(--muted); }
+.ask-what { font-weight: 600; overflow-wrap: anywhere; }
+.ask-on { font-size: 11px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+.ask-why { font-size: 12px; color: var(--muted); font-style: italic; margin-top: 4px; }
+.ask-code { margin: 8px 0 0; max-height: 220px; overflow: auto; padding: 8px; border-radius: 6px; background: var(--code-bg); color: var(--code-fg); font: 11px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+.ask-btns { display: flex; gap: 8px; margin-top: 10px; }
+.ask-btns .cm-btn { flex: 1; }
+.ask-state { margin-top: 6px; font-size: 12px; font-weight: 600; }
+.ask-state.ok { color: var(--ok); } .ask-state.no { color: var(--err); }
+.out { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; padding: 8px 10px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); }
+.out .nm { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.out .sz { font-size: 11px; color: var(--faint); }
+.watches { display: none; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface); font-size: 12px; }
+.watches.on { display: block; }
+.watches .wt { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); margin-bottom: 4px; }
+.w { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; }
+.w .wi { flex: 1; min-width: 0; }
+.w .wn { font-weight: 600; }
+.w .ws { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.w .we { color: var(--err); }
 .under { display: flex; align-items: center; margin-top: 6px; }
 .under .cm-btn-ghost { margin-left: auto; }
 `);
@@ -73,6 +96,7 @@ document.body.innerHTML = `
     </div>
   </div>
   <div class="banner" id="banner"></div>
+  <div class="watches" id="watches"></div>
   <div class="log" id="log"></div>
   <div class="stage">
     <div class="mascot" id="mascot" title="Hi, I'm Clawd!">${clawdSpriteHtml(112)}</div>
@@ -172,6 +196,9 @@ setInterval(() => {
 function stageFor(thread, running, busyHere) {
   const last = thread[thread.length - 1];
   if (!domain) return ['idle', 'Open a web page and I’ll remodel it for you!'];
+  if (busyHere && last && last.events.some(ev => ev.type === 'approval' && ev.state === 'pending')) {
+    return ['wave', 'I need your OK below 👇'];
+  }
   if (busyHere && last) {
     for (let i = last.events.length - 1; i >= 0; i--) {
       const ev = last.events[i];
@@ -191,7 +218,32 @@ function stageFor(thread, running, busyHere) {
 }
 
 /** Group consecutive tool events so a run of Read/Grep calls renders as one chip row. */
-function renderEvents(events) {
+const SIZE = n => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
+const hostPath = u => { try { const x = new URL(u); return x.host + x.pathname; } catch { return u || ''; } };
+
+function renderApproval(ev, job) {
+  const pending = ev.state === 'pending';
+  const result = { approved: ['ok', 'Approved ✓'], denied: ['no', 'Denied'], expired: ['no', 'No answer — skipped'] }[ev.state];
+  return `<div class="ask${pending ? '' : ' done'}">
+    <div class="ask-h">${pending ? '🔐 Claude asks to' : 'Claude asked to'}</div>
+    <div class="ask-what">${esc(ev.what)}</div>
+    ${ev.url ? `<div class="ask-on">on ${esc(hostPath(ev.url))}</div>` : ''}
+    ${ev.reason ? `<div class="ask-why">“${esc(ev.reason)}”</div>` : ''}
+    ${ev.code ? `<pre class="ask-code">${esc(ev.code)}</pre>` : ''}
+    ${pending
+    ? `<div class="ask-btns"><button class="cm-btn" data-ok="1" data-req="${esc(job.requestId)}" data-call="${esc(ev.callId)}">Approve</button>
+       <button class="cm-btn-ghost" data-ok="0" data-req="${esc(job.requestId)}" data-call="${esc(ev.callId)}">Deny</button></div>`
+    : `<div class="ask-state ${result[0]}">${result[1]}</div>`}
+  </div>`;
+}
+
+function renderOutput(ev, job) {
+  return `<div class="out">📄<span class="nm" title="${esc(ev.path)}">${esc(ev.name)}</span><span class="sz">${SIZE(ev.size)}</span>
+    ${ev.inline ? `<button class="cm-btn-ghost" data-dl="${ev.ix}" data-req="${esc(job.requestId)}" data-name="${esc(ev.name)}">Download</button>` : ''}
+    <button class="cm-btn-ghost" data-copy="${esc(ev.winPath)}" title="${esc(ev.winPath)}">Copy path</button></div>`;
+}
+
+function renderEvents(events, job) {
   let html = '';
   let tools = [];
   const flush = () => {
@@ -207,13 +259,15 @@ function renderEvents(events) {
     if (ev.type === 'user') html += `<div class="user">${esc(ev.text)}</div>`;
     else if (ev.type === 'narration') html += `<div class="say">${esc(ev.text)}</div>`;
     else if (ev.type === 'note') html += `<div class="note">${esc(ev.text)}</div>`;
+    else if (ev.type === 'approval') html += renderApproval(ev, job);
+    else if (ev.type === 'output') html += renderOutput(ev, job);
   }
   flush();
   return html;
 }
 
 function renderTurn(job) {
-  let html = `<div class="turn">${renderEvents(job.events)}`;
+  let html = `<div class="turn">${renderEvents(job.events, job)}`;
   if (job.error) html += `<div class="fail">${esc(job.error)}</div>`;
   if (job.status !== 'running') {
     html += `<div class="meta">${job.status === 'error' ? 'Failed' : 'Done'}${job.cost ? ` · $${job.cost.toFixed(3)}` : ''}</div>`;
@@ -233,9 +287,12 @@ function render() {
   const last = thread[thread.length - 1];
   const running = state && state.running;
   const busyHere = running && running.domain === domain;
+  const pendingAsk = !!last && last.events.some(ev => ev.type === 'approval' && ev.state === 'pending');
+  renderWatches((state && state.watches) || []);
 
   // Status line for this site.
   if (!domain) setStatus('', 'No site in this tab');
+  else if (busyHere && pendingAsk) setStatus('run', '<span class="cm-dot live"></span>Waiting for your approval');
   else if (busyHere) setStatus('run', '<span class="cm-dot live"></span>Claude is working…');
   else if (last && last.status === 'error') setStatus('bad', '<span class="cm-dot"></span>Last request failed');
   else if (state && state.script) setStatus(state.script.enabled ? 'ok' : '', `<span class="cm-dot"></span>Script ${state.script.enabled ? 'active' : 'disabled'}`);
@@ -268,12 +325,12 @@ function render() {
         : 'Describe how you want this site to look or behave, and Claude will write a userscript for it.'}</div></div>`;
   } else {
     logEl.innerHTML = thread.map(renderTurn).join('');
-    if (atBottom || busyHere) logEl.scrollTop = logEl.scrollHeight;
+    if (atBottom || busyHere || pendingAsk) logEl.scrollTop = logEl.scrollHeight;
   }
 
   // Resulting script of the latest finished turn.
   const resultEl = $('result');
-  if (last && last.script && last.status !== 'running') {
+  if (last && last.script && last.edited && last.status !== 'running') {
     resultEl.innerHTML = `<details class="script" id="code" ${codeOpen ? 'open' : ''}>
       <summary>Userscript<button id="apply" class="cm-btn">Apply &amp; reload</button></summary>
       <pre>${esc(last.script)}</pre></details>`;
@@ -303,6 +360,60 @@ function render() {
   inputEl.placeholder = !domain ? 'Open a web page first'
     : thread.length ? `Refine ${domain}…` : `Describe a change to ${domain}…`;
 }
+
+function timeAgo(t) {
+  const s = Math.round((Date.now() - t) / 1000);
+  return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`;
+}
+
+function renderWatches(list) {
+  const box = $('watches');
+  box.classList.toggle('on', list.length > 0);
+  box.innerHTML = list.length ? `<div class="wt">⏱ Watches on this site</div>${list.map(w => `
+    <div class="w"><div class="wi">
+      <div class="wn">${esc(w.name)}${w.paused ? ' (paused)' : ''}</div>
+      <div class="ws" title="${esc(w.url)}">every ${w.intervalSec}s · ${w.lastRun ? `checked ${timeAgo(w.lastRun)}` : 'not run yet'}${w.last != null ? ` · ${esc(w.last)}` : ''}</div>
+      ${w.error ? `<div class="we">${esc(w.error)}</div>` : ''}
+    </div><button class="cm-btn-ghost" data-stop="${esc(w.id)}">Stop</button></div>`).join('')}` : '';
+}
+
+$('watches').addEventListener('click', async e => {
+  const b = e.target.closest('[data-stop]');
+  if (!b) return;
+  b.disabled = true;
+  try { await sendCmdDirectly('AIWatchDelete', { id: b.dataset.stop }); } catch (err) { setStatus('bad', esc(err)); }
+  refresh();
+});
+
+logEl.addEventListener('click', async e => {
+  const ok = e.target.closest('[data-ok]');
+  if (ok) {
+    ok.parentNode.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    await sendCmdDirectly('AIApprove', { requestId: ok.dataset.req, callId: ok.dataset.call, ok: ok.dataset.ok === '1' });
+    refresh();
+    return;
+  }
+  const dl = e.target.closest('[data-dl]');
+  if (dl) {
+    const content = await sendCmdDirectly('AIGetOutput', { requestId: dl.dataset.req, ix: +dl.dataset.dl });
+    if (content == null) { setStatus('bad', 'That file is no longer in memory; use Copy path.'); return; }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([content], { type: 'application/octet-stream' }));
+    a.download = dl.dataset.name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 5000);
+    return;
+  }
+  const cp = e.target.closest('[data-copy]');
+  if (cp) {
+    try {
+      await navigator.clipboard.writeText(cp.dataset.copy);
+      cp.textContent = 'Copied ✓';
+      setTimeout(() => { cp.textContent = 'Copy path'; }, 1500);
+    } catch { /* clipboard blocked */ }
+  }
+});
 
 let pending = false;
 function refresh() {

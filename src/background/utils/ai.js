@@ -16,6 +16,8 @@ import { addOwnCommands } from './init';
 import storage, { S_CODE } from './storage';
 import { getScripts, parseScript } from './db';
 import { classifyTool } from '@/common/clawd-actions';
+import { runTabTool, waitTabLoaded } from './tab-tools';
+import { createWatch, deleteWatch, listWatches } from './watches';
 
 const HOST_NAME = 'claudemonkey.bridge';
 const NS = 'claudemonkey';
@@ -221,7 +223,17 @@ function onPortMessage(msg) {
       delete msg.detail; // UI pages re-pull state; no need to broadcast the code
       break;
     }
+    case 'browser-call':
+      handleBrowserCall(job, msg);
+      return;
+    case 'output': {
+      // A file Claude saved for the user; content (if small enough) is fetched on demand.
+      (job.outputs || (job.outputs = [])).push(msg.content);
+      job.events.push({ type: 'output', ix: job.outputs.length - 1, name: msg.name, path: msg.path, winPath: msg.winPath, size: msg.size, inline: msg.content != null });
+      break;
+    }
     case 'done': {
+      if (msg.sawEdit) job.edited = true;
       // End of one Claude pass. Accumulate its output and hand control back to the
       // verify loop, which decides whether to apply/test/resume or finalize.
       job.script = msg.script || job.script;
@@ -433,7 +445,7 @@ addOwnCommands({
    * in it, oldest first) plus a header for whatever job is running, possibly on another
    * site. Without it, the active/most-recent job as before.
    */
-  AIGetState({ domain } = {}) {
+  async AIGetState({ domain } = {}) {
     if (domain == null) {
       const job = activeRequestId && jobs.get(activeRequestId);
       return job ? fullJob(job) : null;
@@ -445,7 +457,24 @@ addOwnCommands({
       thread: (threads.get(domain) || []).map(id => jobs.get(id)).filter(Boolean).map(fullJob),
       running: active && active.status === 'running' ? jobHeader(active) : null,
       script: s ? { id: s.props.id, enabled: !!s.config?.enabled } : null,
+      watches: await listWatches(domain),
     };
+  },
+
+  /** The user's answer to a tab-tool approval card in the sidebar. */
+  AIApprove({ requestId, callId, ok } = {}) {
+    const answer = jobs.get(requestId)?.approvals?.get(callId);
+    if (answer) answer(!!ok);
+  },
+
+  /** Content of a file Claude saved (for the sidebar's Download button). */
+  AIGetOutput({ requestId, ix } = {}) {
+    const c = jobs.get(requestId)?.outputs?.[ix];
+    return c == null ? null : c;
+  },
+
+  AIWatchDelete({ id } = {}) {
+    return deleteWatch(String(id));
   },
 
   /** Forget a site's conversation so the next request starts a fresh Claude session. */
@@ -542,7 +571,9 @@ async function runVerifyLoop(job, { prompt, context, currentScript }) {
     sessionId: job.sessionId,
   });
   if (res.error) return finalize(job, res);
-  if (!job.script) return finalize(job, res); // nothing to test
+  // Only a changed userscript needs installing and testing; action-only requests (and
+  // answers, outputs, watches) must not reload the page out from under the user.
+  if (!job.edited || !job.script) return finalize(job, res);
 
   for (let round = 1; round <= MAX_VERIFY_ROUNDS; round++) {
     broadcastNote(job, `Installing the script and reloading ${job.domain} to test it (round ${round}/${MAX_VERIFY_ROUNDS})…`);
@@ -658,15 +689,117 @@ async function finalize(job, res) {
     job.status = 'error';
     job.error = res.error;
     clawd(job, { op: 'error' });
-  } else {
+  } else if (job.edited) {
     job.status = 'done';
     job.error = null;
     // Ensure the converged script is the one actually installed and live.
     try { await parseScript({ [S_CODE]: job.script || '', url: job.url, reloadTab: true }); } catch { /* leave last-applied */ }
     // That reload wipes the mascot; bring it back to celebrate on the finished page.
     waitTabLoaded(job.tabId).then(() => clawd(job, { op: 'done' }));
+  } else {
+    job.status = 'done';
+    job.error = null;
+    clawd(job, { op: 'done' });
   }
+  // Anything still waiting for the user's OK is moot now.
+  for (const answer of (job.approvals || new Map()).values()) answer(false);
   broadcast(job, { type: 'done', error: job.error, script: job.script });
+}
+
+// ---------------------------------------------------------------------------
+// Clawdify tools: every tab tool waits for the user's Approve click in the sidebar
+// ---------------------------------------------------------------------------
+
+const APPROVAL_MS = 240000; // the bridge gives up at ~270s
+const UNGATED = new Set(['notify', 'watch_list', 'watch_delete']);
+
+/** What the approval card says (and shows) for a tool call. */
+function describeCall(tool, args) {
+  const q = s => `“${String(s).slice(0, 120)}”`;
+  switch (tool) {
+  case 'page_info': return { what: 'Read the page’s URL, title and your selected text' };
+  case 'page_snapshot': return { what: `Read the page’s current content${args.selector ? ` (${args.selector})` : ''}` };
+  case 'page_eval': return { what: 'Run this code in the tab', code: String(args.code || '') };
+  case 'click': return { what: `Click ${args.selector}${args.index ? ` (match #${args.index})` : ''}` };
+  case 'type': return { what: `Type ${q(args.text || '')} into ${args.selector}${args.submit ? ' and submit the form' : ''}` };
+  case 'navigate': return { what: `Go to ${args.url}` };
+  case 'reload': return { what: 'Reload the page' };
+  case 'wait_for': return { what: `Wait for ${args.selector || q(args.text || '')}` };
+  case 'screenshot': return { what: 'Take a screenshot of the visible tab' };
+  case 'watch_create': return {
+    what: `Every ${Math.max(30, args.intervalSeconds | 0)}s, reload ${args.url || 'this page'}`
+      + ` ${args.tab === 'current' ? 'in this tab' : 'in a background tab'} and run this code; notify on ${args.notifyWhen || 'change'}`,
+    code: String(args.code || ''),
+  };
+  default: return { what: tool };
+  }
+}
+
+function askApproval(job, callId, tool, args) {
+  return new Promise(resolve => {
+    let url = job.url;
+    const ev = {
+      type: 'approval', callId, tool, state: 'pending',
+      reason: String(args.reason || '').slice(0, 240),
+      ...describeCall(tool, args),
+    };
+    browser.tabs.get(job.tabId).then(t => { url = t.url; ev.url = url; broadcast(job, { type: 'progress' }); }, () => {});
+    ev.url = url;
+    job.events.push(ev);
+    const approvals = job.approvals || (job.approvals = new Map());
+    let timer;
+    const answer = ok => {
+      if (ev.state !== 'pending') return;
+      clearTimeout(timer);
+      approvals.delete(callId);
+      ev.state = ok ? 'approved' : 'denied';
+      broadcast(job, { type: 'progress' });
+      resolve(ok);
+    };
+    timer = setTimeout(() => { answer(false); ev.state = 'expired'; broadcast(job, { type: 'progress' }); }, APPROVAL_MS);
+    approvals.set(callId, answer);
+    broadcast(job, { type: 'progress' });
+    clawd(job, { op: 'act', kind: 'wave', selectors: [], label: 'Waiting for your OK in the sidebar' });
+    browser.notifications.create(`clawdify-approve-${callId}`, {
+      type: 'basic',
+      iconUrl: browser.runtime.getURL('/public/images/icon128.png'),
+      title: 'Clawdify needs your OK',
+      message: `${ev.what}. Approve or deny it in the sidebar.`,
+    });
+  });
+}
+
+async function handleBrowserCall(job, { callId, tool, args = {} }) {
+  const reply = (result, error) => {
+    try {
+      ensurePort().postMessage({ type: 'browser-result', requestId: job.requestId, callId, result, error });
+    } catch { /* bridge gone; its own timeout reports it */ }
+  };
+  try {
+    if (UNGATED.has(tool)) {
+      if (tool === 'notify') {
+        browser.notifications.create(`clawdify-note-${Date.now()}`, {
+          type: 'basic',
+          iconUrl: browser.runtime.getURL('/public/images/icon128.png'),
+          title: String(args.title || 'Clawdify').slice(0, 80),
+          message: String(args.message || '').slice(0, 300),
+        });
+        broadcastNote(job, `🔔 ${args.message}`);
+        return reply('Notification shown.');
+      }
+      if (tool === 'watch_list') return reply(await listWatches(job.domain));
+      return reply(await deleteWatch(String(args.id)));
+    }
+    if (!await askApproval(job, callId, tool, args)) {
+      return reply(null, 'The user did not approve this (denied or no answer). Don’t retry it; explain what you needed it for.');
+    }
+    if (tool === 'watch_create') return reply(await createWatch(job, args));
+    // Keep the mascot out of what Claude reads or sees.
+    if (/^(page_snapshot|page_eval|screenshot)$/.test(tool)) await clawdNow(job.tabId, { op: 'hide' });
+    reply(await runTabTool(job.tabId, job.windowId, tool, args));
+  } catch (e) {
+    reply(null, String((e && e.message) || e));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -691,17 +824,6 @@ export async function clawdNow(tabId, msg) {
     await browser.tabs.executeScript(tabId, { file: '/clawd-overlay.js' });
     await browser.tabs.executeScript(tabId, { code: `window.__cmClawd && window.__cmClawd(${JSON.stringify(msg)}); 0` });
   } catch { /* restricted page, closed tab, ... */ }
-}
-
-async function waitTabLoaded(tabId, timeout = 10000) {
-  await delay(300); // let the reload begin
-  for (const end = Date.now() + timeout; Date.now() < end; await delay(200)) {
-    try {
-      if ((await browser.tabs.get(tabId)).status === 'complete') return;
-    } catch {
-      return;
-    }
-  }
 }
 
 function broadcastNote(job, text) {
@@ -729,5 +851,6 @@ function fullJob(job) {
     error: job.error,
     cost: job.cost || 0,
     endedAt: job.endedAt || 0,
+    edited: !!job.edited,
   };
 }

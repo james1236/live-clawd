@@ -52,6 +52,24 @@ const VERB = {
   tinker: 'Tinkering with',
 };
 
+/** Clawdify's own tools (see bridge/mcp-browser.js). */
+const TAB_TOOLS = {
+  page_info: ['read', 'Checking the page'],
+  page_snapshot: ['read', 'Reading the page'],
+  page_eval: ['hack', 'Running a snippet'],
+  click: ['wire', 'Clicking'],
+  type: ['write', 'Typing'],
+  navigate: ['fetch', 'Heading to another page'],
+  reload: ['fetch', 'Reloading'],
+  wait_for: ['watch', 'Waiting for the page'],
+  screenshot: ['photo', 'Taking a screenshot'],
+  save_output: ['stash', 'Saving a file for you'],
+  notify: ['wave', 'Pinging you'],
+  watch_create: ['watch', 'Setting up a watch'],
+  watch_list: ['read', 'Checking watches'],
+  watch_delete: ['erase', 'Stopping a watch'],
+};
+
 /** Captions when the change has no particular element to point at. */
 const NO_SEL_LABEL = {
   hack: 'Hacking the network 😎',
@@ -203,6 +221,10 @@ function classifySource(name, detail, file) {
  */
 export function classifyTool(name, detail = '', file = '') {
   detail = String(detail || '');
+  if (name.startsWith('mcp__clawdify__')) {
+    const [kind, label] = TAB_TOOLS[name.slice(15)] || ['think', 'Thinking…'];
+    return { kind, selectors: /click|type|wait_for|page_snapshot/.test(name) && looksLikeSelector(detail) ? [detail] : [], label };
+  }
   if (file || name === 'Bash' && !/^curl\b/.test(detail)) return classifySource(name, detail, file);
   if (name === 'Grep') {
     return { kind: 'search', selectors: [], pattern: detail.slice(0, 200), label: `${VERB.search} “${detail.slice(0, 28)}”` };
