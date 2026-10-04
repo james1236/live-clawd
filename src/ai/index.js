@@ -26,6 +26,8 @@ body { width: 360px; }
 .row .cm-btn { margin-left: auto; }
 .foot { display: flex; align-items: center; gap: 14px; padding: 9px 16px; border-top: 1px solid var(--border); background: var(--surface-2); font-size: 12px; }
 .foot .sp { flex: 1; }
+.live { display: flex; align-items: center; gap: 10px; padding: 7px 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+.live a { margin-left: auto; }
 `);
 
 document.body.innerHTML = `
@@ -43,6 +45,10 @@ document.body.innerHTML = `
       <span class="cm-kbd">Ctrl+Enter to send</span>
       <button id="go" class="cm-btn">Ask Claude</button>
     </div>
+  </div>
+  <div class="live" title="Clawd acts out what your Claude Code sessions in WSL are doing, on their localhost dev pages">
+    <label class="cm-switch"><input type="checkbox" id="live"><span class="track"></span><span id="live-label">Live Clawd on localhost</span></label>
+    <a id="mute" hidden></a>
   </div>
   <div class="foot">
     <span id="toggle-slot"></span>
@@ -110,6 +116,26 @@ function renderToggle(script, tab) {
 }
 
 loadSite().catch(e => showError(String((e && e.message) || e)));
+
+async function loadLive() {
+  const tab = (await browser.tabs.query({ active: true, currentWindow: true }))[0];
+  const url = tab && tab.url;
+  const st = await sendCmdDirectly('ClawdLiveGet', { url });
+  $('live').checked = st.enabled;
+  $('live-label').textContent = `Live Clawd on localhost${st.enabled && !st.connected ? ' (connecting…)' : ''}`;
+  const mute = $('mute');
+  mute.hidden = !st.local || !st.enabled;
+  mute.textContent = st.muted ? 'Unmute here' : 'Mute here';
+  mute.onclick = async () => {
+    await sendCmdDirectly('ClawdLiveSet', { url, muted: !st.muted });
+    loadLive();
+  };
+  $('live').onchange = async e => {
+    await sendCmdDirectly('ClawdLiveSet', { enabled: e.target.checked });
+    loadLive();
+  };
+}
+loadLive().catch(() => {});
 
 $('dash').addEventListener('click', () => {
   browser.runtime.openOptionsPage();

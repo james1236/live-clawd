@@ -368,6 +368,11 @@ function assetName(r, i) {
   return `${String(i + 1).padStart(2, '0')}-${base}`;
 }
 
+/** Tabs a Clawdify job is currently working in (Live Clawd stays out of these). */
+export function busyTabIds() {
+  return new Set([...jobs.values()].filter(j => j.status === 'running').map(j => j.tabId));
+}
+
 addOwnCommands({
   /** Start (or continue) a generation for the active tab. @return {Promise<object>} job header */
   async AIGenerate({ prompt } = {}) {
@@ -681,7 +686,7 @@ function clawd(job, msg) {
   });
 }
 
-async function clawdNow(tabId, msg) {
+export async function clawdNow(tabId, msg) {
   try {
     await browser.tabs.executeScript(tabId, { file: '/clawd-overlay.js' });
     await browser.tabs.executeScript(tabId, { code: `window.__cmClawd && window.__cmClawd(${JSON.stringify(msg)}); 0` });

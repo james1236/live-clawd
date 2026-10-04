@@ -68,6 +68,7 @@ const RIGHT = [
     R(15, -3, 2.2, 6, 'rgba(120,190,240,.9)'), R(15, -3, 2.2, 1.6, 'rgba(255,255,255,.35)', 'cw-water-air'),
     R(15.4, -4, 1.4, 1, '#3a7bd5'), R(15, 0, 2.2, 1, '#ffffff'),
   ]),
+  G('cw-prop cw-p-ask', [R(15.6, 1, 0.8, 4.5, WOOD), R(13.8, -4.4, 6, 5, '#fff3c4'), R(13.8, -4.4, 6, 0.6, '#e2b04a'), T(14.9, -0.5, 3.4, '#c0392b', '!?', 'cw-sign-text')]),
   G('cw-prop cw-p-key', [C(16, 0.5, 1.2, '#e2b04a'), C(16, 0.5, 0.45, '#8a6a1f'), R(15.6, 1.5, 0.8, 3.5, '#e2b04a'), R(16.4, 3.5, 0.8, 0.5, '#e2b04a')]),
 ];
 
@@ -216,6 +217,7 @@ const SHOW = {
   polish: ['cw-p-sponge', 'cw-glints'],
   tinker: ['cw-p-wrench'],
   water: ['cw-p-bottle', 'cw-glugs'],
+  wave: ['cw-p-ask'],
   canvas: ['cw-f-easel', 'cw-p-brush', 'cw-h-beret'],
 };
 const showCss = Object.entries(SHOW)
@@ -372,6 +374,13 @@ ${showCss}
 .m-water .cw-water-air { transform-origin: 16px -3px; animation: cw-drain 2.8s ease-in infinite; }
 .cw-glug { animation: cw-float 1s ease-out infinite; }
 .cw-g2 { animation-delay: .33s; } .cw-g3 { animation-delay: .66s; }
+
+/* needs the user: waves a sign, taps a foot */
+@keyframes cw-waggle { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg); } }
+.m-wave .cw-ar { animation: cw-waggle .6s ease-in-out infinite; }
+.m-wave .cw-al { animation: cw-wave .6s steps(2) infinite; }
+.m-wave .cw-l4 { animation: cw-step .4s steps(2) infinite; }
+.m-wave .cw-look { animation: none; transform: translateY(-.5px); }
 
 /* done: happy jumps, arms up, hearts */
 @keyframes cw-jump {

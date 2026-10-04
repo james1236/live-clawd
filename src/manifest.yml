@@ -66,6 +66,8 @@ commands:
     description: __MSG_updateScriptsAll__
   updateScriptsInTab:
     description: __MSG_updateScriptsInTab__
+  toggleClawdLive:
+    description: Toggle Live Clawd on localhost dev pages
 
 minimum_chrome_version: '86.0'
 # to support popular forks for older OS

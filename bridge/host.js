@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * ClaudeMonkey native-messaging host.
+ * Clawdify (ClaudeMonkey) native-messaging host.
  *
  * Firefox launches this process and speaks the WebExtension native-messaging
  * protocol over stdio: every message is a 4-byte little-endian length prefix
@@ -13,13 +13,17 @@
  *      ANTHROPIC_API_KEY stripped so it bills against the Claude subscription
  *   4. relay the streamed events back to the extension and, on completion,
  *      send the final userscript text back for installation.
+ *
+ * {type:"live-subscribe"} turns this process into the Live Clawd relay instead: it
+ * heartbeats ~/.claudemonkey/live/alive and forwards events that live-hook.sh (a
+ * Claude Code hook) spools while Claude works on a project with a local dev server.
  */
 'use strict';
 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const readline = require('readline');
 
 const HOME = os.homedir();
@@ -30,6 +34,10 @@ const BASE = path.join(HOME, '.claudemonkey', 'sites');
 // the log dir, not the per-site working dirs.
 const FEEDBACK_DIR = path.join(HOME, '.claudemonkey', 'logs');
 const FEEDBACK_PATH = path.join(FEEDBACK_DIR, 'feedback.md');
+// Live Clawd: Claude Code hooks drop events here while Firefox is listening.
+const LIVE_DIR = path.join(HOME, '.claudemonkey', 'live');
+const SPOOL_DIR = path.join(LIVE_DIR, 'spool');
+const ALIVE_PATH = path.join(LIVE_DIR, 'alive');
 
 function loadConfig() {
   try {
@@ -147,6 +155,10 @@ function handleMessage(msg) {
     sendMessage({ type: 'pong', requestId: msg.requestId, claudeBin: CLAUDE_BIN, claudeConfigDir: CLAUDE_CONFIG_DIR || undefined });
     return;
   }
+  if (msg.type === 'live-subscribe') {
+    startLive();
+    return;
+  }
   if (msg.type === 'generate') {
     try {
       runGenerate(msg);
@@ -184,6 +196,160 @@ function toolDetail(c) {
   else if (c.name === 'Read') d = input.file_path ? path.basename(input.file_path) : '';
   else if (c.name === 'Bash') d = input.command;
   return String(d || '').slice(0, 8000);
+}
+
+// ----------------------------------------------------------------------------
+// Live Clawd: relay Claude Code hook events for projects with a dev server.
+// Purely cosmetic: nothing here talks to Claude or changes what it does.
+// ----------------------------------------------------------------------------
+let liveTimers = null;
+
+function startLive() {
+  if (liveTimers) return;
+  fs.mkdirSync(SPOOL_DIR, { recursive: true });
+  const beat = () => {
+    const now = new Date();
+    try { fs.utimesSync(ALIVE_PATH, now, now); } catch { try { fs.writeFileSync(ALIVE_PATH, ''); } catch { /* ignore */ } }
+  };
+  beat();
+  // Anything spooled before we started listening is stale.
+  try { for (const f of fs.readdirSync(SPOOL_DIR)) fs.unlinkSync(path.join(SPOOL_DIR, f)); } catch { /* ignore */ }
+  liveTimers = [setInterval(beat, 5000), setInterval(drainSpool, 250)];
+  sendMessage({ type: 'live-ready' });
+}
+
+function drainSpool() {
+  let files;
+  try { files = fs.readdirSync(SPOOL_DIR).filter(f => f.endsWith('.json')).sort(); } catch { return; }
+  for (const f of files) {
+    const p = path.join(SPOOL_DIR, f);
+    let raw;
+    try { raw = fs.readFileSync(p, 'utf8'); fs.unlinkSync(p); } catch { continue; }
+    let ev;
+    try { ev = JSON.parse(raw); } catch { continue; }
+    try { relayLive(ev); } catch { /* cosmetic; never die over it */ }
+  }
+}
+
+function loadLiveConfig() {
+  try {
+    const c = JSON.parse(fs.readFileSync(path.join(HOME, '.claudemonkey', 'live.json'), 'utf8'));
+    const expand = p => path.resolve(String(p).replace(/^~(?=$|\/)/, HOME));
+    const projects = {};
+    for (const [k, v] of Object.entries(c.projects || {})) projects[expand(k)] = v;
+    return { projects, ignore: (c.ignore || []).map(expand) };
+  } catch {
+    return { projects: {}, ignore: [] };
+  }
+}
+
+const rootCache = new Map();
+function projectRoot(cwd) {
+  if (!rootCache.has(cwd)) {
+    let root = cwd;
+    try {
+      root = execFileSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || cwd;
+    } catch { /* not a repo */ }
+    rootCache.set(cwd, root);
+  }
+  return rootCache.get(cwd);
+}
+
+const inside = (p, root) => p === root || p.startsWith(`${root}/`);
+
+/** Loopback/wildcard TCP listeners with the cwd and command line of their process. */
+let portsCache = { at: 0, list: [] };
+function listeners() {
+  if (Date.now() - portsCache.at < 4000) return portsCache.list;
+  const list = [];
+  try {
+    const out = execFileSync('ss', ['-ltnpH'], { encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'] });
+    for (const line of out.split('\n')) {
+      const cols = line.trim().split(/\s+/);
+      const local = cols[3] || '';
+      const host = local.slice(0, local.lastIndexOf(':'));
+      const port = +local.slice(local.lastIndexOf(':') + 1);
+      if (!port || !/^(127\.|\[::1\]|\*|0\.0\.0\.0|\[::\]|\[::ffff:127)/.test(host)) continue;
+      for (const m of line.matchAll(/pid=(\d+)/g)) {
+        let cwd = '';
+        let cmd = '';
+        try { cwd = fs.readlinkSync(`/proc/${m[1]}/cwd`); } catch { /* gone */ }
+        try { cmd = fs.readFileSync(`/proc/${m[1]}/cmdline`, 'utf8').replace(/\0/g, ' '); } catch { /* gone */ }
+        list.push({ port, cwd, cmd });
+      }
+    }
+  } catch { /* no ss */ }
+  portsCache = { at: Date.now(), list };
+  return list;
+}
+
+/** Dev-server ports for a project: live.json entries plus listeners running from it. */
+function devPorts(root, cfg) {
+  const ports = new Set();
+  for (const [proj, urls] of Object.entries(cfg.projects)) {
+    if (!inside(root, proj) && !inside(proj, root)) continue;
+    for (const u of [].concat(urls)) {
+      try { ports.add(+new URL(u).port || 80); } catch { /* bad url */ }
+    }
+  }
+  for (const l of listeners()) {
+    if ((l.cwd && inside(l.cwd, root)) || l.cmd.includes(`${root}/`)) ports.add(l.port);
+  }
+  return [...ports];
+}
+
+/** First sentence of Claude's latest narration, read from the session transcript. */
+function lastNarration(transcript) {
+  if (!transcript) return '';
+  try {
+    const fd = fs.openSync(transcript, 'r');
+    const size = fs.fstatSync(fd).size;
+    const len = Math.min(size, 96 * 1024);
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, size - len);
+    fs.closeSync(fd);
+    const lines = buf.toString('utf8').split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i].includes('"assistant"')) continue;
+      let o;
+      try { o = JSON.parse(lines[i]); } catch { continue; }
+      const parts = (o.message && Array.isArray(o.message.content)) ? o.message.content : [];
+      const t = parts.filter(c => c.type === 'text' && c.text).map(c => c.text).join(' ').trim();
+      if (t) {
+        const first = t.replace(/[`*_#>]/g, '').replace(/\s+/g, ' ').split(/(?<=[.!?:])\s/)[0];
+        return first.length > 90 ? `${first.slice(0, 89)}…` : first;
+      }
+    }
+  } catch { /* unreadable */ }
+  return '';
+}
+
+function relayLive(ev) {
+  if (!ev || !ev.cwd) return;
+  const root = projectRoot(ev.cwd);
+  const cfg = loadLiveConfig();
+  if (cfg.ignore.some(p => inside(root, p))) return;
+  const ports = devPorts(root, cfg);
+  if (!ports.length) return;
+  const out = {
+    type: 'live',
+    session: String(ev.session_id || 'default'),
+    project: path.basename(root),
+    event: ev.hook_event_name,
+    ports,
+  };
+  if (ev.hook_event_name === 'PreToolUse') {
+    const input = ev.tool_input || {};
+    out.tool = ev.tool_name;
+    out.detail = toolDetail({ name: ev.tool_name, input });
+    if (input.file_path) out.file = path.relative(root, String(input.file_path));
+    out.say = lastNarration(ev.transcript_path);
+  } else if (ev.hook_event_name === 'Notification') {
+    out.message = String(ev.message || '').slice(0, 120);
+  } else if (ev.hook_event_name === 'UserPromptSubmit') {
+    out.message = String(ev.prompt || '').replace(/\s+/g, ' ').slice(0, 80);
+  }
+  sendMessage(out);
 }
 
 /**
@@ -333,6 +499,7 @@ routine successes — and it is separate from your reply to the user.
 
   const env = { ...process.env, ...CLAUDE_ENV };
   delete env.ANTHROPIC_API_KEY; // never bypass the subscription (not even via config.env)
+  env.CLAWDIFY_LIVE = '0'; // our own runs shouldn't summon the Live Clawd hooks
   if (CLAUDE_CONFIG_DIR) env.CLAUDE_CONFIG_DIR = CLAUDE_CONFIG_DIR; // run under the chosen account profile
 
   const state = { session: msg.sessionId || null, result: '', cost: 0, edits: 0, transcript: [], error: null };

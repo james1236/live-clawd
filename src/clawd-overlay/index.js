@@ -1,10 +1,14 @@
 /**
- * Clawd on the page: injected into the tab being edited (tabs.executeScript) while a
- * Clawdify job runs. The background calls `window.__cmClawd(msg)` with:
- *   {op: 'act', kind, selectors, pattern, color, measure, label}  walk to the element
- *       the change touches and act it out (palette for colours, laptop for network…)
- *   {op: 'done' | 'error'}  celebrate / droop, then leave
- *   {op: 'hide'}            vanish at once (before DOM snapshots and screenshots)
+ * Clawd on the page: injected (tabs.executeScript) into the tab a Clawdify job is
+ * editing, and — Live Clawd — into localhost tabs of a project a Claude Code session in
+ * WSL is working on. The background calls `window.__cmClawd(msg)` with:
+ *   {op: 'act', id, kind, selectors, components, pattern, color, measure, label,
+ *    tag, live}           walk to the element the change touches and act it out
+ *   {op: 'done' | 'error', id}  celebrate / droop, then walk off
+ *   {op: 'leave', id}     walk off now
+ *   {op: 'hide'}          remove every Clawd at once (before DOM snapshots/screenshots)
+ * `id` names a Clawd (one per job / Claude session), so several can share a page, each
+ * in its own colour with a name tag. Live Clawds never scroll the page.
  *
  * Everything lives in a closed shadow root on a fixed, click-through layer, built with
  * DOM APIs (no innerHTML) so it works on pages enforcing Trusted Types.
@@ -44,6 +48,10 @@ function install() {
 .water { position: absolute; left: 50%; top: calc(100% + 2px); transform: translateX(-50%); white-space: nowrap;
   font-size: 10px; color: #3a7bd5; background: rgba(255,255,255,.9); border-radius: 8px; padding: 1px 6px; display: none; }
 .water.on { display: block; }
+.tag { position: absolute; left: 50%; top: calc(100% + 1px); transform: translateX(-50%); white-space: nowrap;
+  font-size: 10px; font-weight: 600; color: #faf9f5; background: var(--clawd); border-radius: 7px; padding: 0 6px; opacity: .9; }
+.tag:empty { display: none; }
+.tag + .water { top: calc(100% + 17px); }
 
 /* effects inside the highlight box */
 .fx { position: absolute; inset: 0; }
@@ -89,18 +97,13 @@ function install() {
 .ok-tick { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font: 700 30px system-ui; color: #4f9a45; }
 ${CLAWD_CSS}`;
 
-  let host, layer, hl, fxEl, sprite, face, svg, label, waterEl;
-  let target = null;
-  let action = null;
-  let pos = null; // sprite top-left
-  let lastT = 0;
+  const COLORS = ['#d97757', '#5b8fd9', '#4fa36b', '#a777d6', '#d9a13b', '#d0607e'];
+  let host, layer;
   let raf = 0;
-  let mood = 'idle';
-  let actMood = 'idle';
-  let leaveTimer = 0;
-  let waterUntil = 0;
-  let nextWater = 0;
-  let litres = 0;
+  let lastT = 0;
+  /** @type {Map<string, object>} */
+  const clawds = new Map();
+  let colorIx = 0;
 
   const el = (tag, cls, parent, text) => {
     const n = document.createElement(tag);
@@ -110,41 +113,66 @@ ${CLAWD_CSS}`;
     return n;
   };
 
-  function build() {
-    host = document.createElement('clawdify-overlay');
-    const st = host.style;
-    st.setProperty('all', 'initial', 'important');
-    st.setProperty('position', 'fixed', 'important');
-    st.setProperty('inset', '0', 'important');
-    st.setProperty('z-index', '2147483647', 'important');
-    st.setProperty('pointer-events', 'none', 'important');
-    st.setProperty('display', 'block', 'important');
-    const root = host.attachShadow({ mode: 'closed' });
-    el('style', null, root, STYLE);
-    layer = el('div', 'layer', root);
-    hl = el('div', 'hl', layer);
-    fxEl = el('div', 'fx', hl);
-    sprite = el('div', 'sprite', layer);
-    face = el('div', 'face', sprite);
-    svg = clawdSpriteNode(document, SPRITE_W);
-    face.appendChild(svg);
-    label = el('div', 'label', sprite);
-    waterEl = el('div', 'water', sprite);
-  }
-
-  function ensure() {
-    if (!host) build();
-    if (!host.isConnected) (document.body || document.documentElement).appendChild(host);
-    layer.classList.remove('out');
+  function ensureLayer() {
+    if (!host) {
+      host = document.createElement('clawdify-overlay');
+      const st = host.style;
+      st.setProperty('all', 'initial', 'important');
+      st.setProperty('position', 'fixed', 'important');
+      st.setProperty('inset', '0', 'important');
+      st.setProperty('z-index', '2147483647', 'important');
+      st.setProperty('pointer-events', 'none', 'important');
+      st.setProperty('display', 'block', 'important');
+      const root = host.attachShadow({ mode: 'closed' });
+      el('style', null, root, STYLE);
+      layer = el('div', 'layer', root);
+    }
+    // On <html>, not <body>: stays out of the app's own tree and body-level queries.
+    if (!host.isConnected) document.documentElement.appendChild(host);
     if (!raf) { lastT = performance.now(); raf = requestAnimationFrame(tick); }
   }
 
-  function hide() {
+  function hideAll() {
     cancelAnimationFrame(raf);
     raf = 0;
-    clearTimeout(leaveTimer);
+    for (const c of clawds.values()) { clearTimeout(c.leaveTimer); c.root.remove(); c.hl.remove(); }
+    clawds.clear();
     if (host) host.remove();
-    pos = null;
+  }
+
+  function getClawd(id, tag) {
+    let c = clawds.get(id);
+    if (c) return c;
+    const hl = el('div', 'hl', layer);
+    const root = el('div', 'sprite', layer);
+    const color = COLORS[colorIx++ % COLORS.length];
+    root.style.setProperty('--clawd', color);
+    hl.style.setProperty('--accent', color);
+    const face = el('div', 'face', root);
+    const svg = clawdSpriteNode(document, SPRITE_W);
+    face.appendChild(svg);
+    c = {
+      id, hl, root, face, svg,
+      fx: el('div', 'fx', hl),
+      label: el('div', 'label', root),
+      tagEl: el('div', 'tag', root, tag || ''),
+      waterEl: el('div', 'water', root),
+      target: null, action: null, pos: null, mood: 'idle', actMood: 'idle',
+      leaveTimer: 0, leaving: false, live: false,
+      waterUntil: 0, nextWater: 0, litres: 0,
+    };
+    // Later Clawds stand a little to the side so they don't stack exactly.
+    c.offset = (clawds.size % 3) * 40;
+    clawds.set(id, c);
+    return c;
+  }
+
+  function removeClawd(c) {
+    clearTimeout(c.leaveTimer);
+    c.root.remove();
+    c.hl.remove();
+    clawds.delete(c.id);
+    if (!clawds.size) hideAll();
   }
 
   function visible(n) {
@@ -172,11 +200,65 @@ ${CLAWD_CSS}`;
     return null;
   }
 
+  /**
+   * Dev builds of React keep component names on the fiber tree hanging off DOM nodes.
+   * Firefox lets content scripts read page objects through `wrappedJSObject`.
+   */
+  function findByComponent(names) {
+    if (!names || !names.length) return null;
+    const want = new Set(names);
+    const raw = n => n && (n.wrappedJSObject || n);
+    let rootFiber = null;
+    for (const n of [document.getElementById('root'), document.getElementById('app'), document.body, ...(document.body ? document.body.children : [])]) {
+      const w = raw(n);
+      if (!w) continue;
+      let key;
+      try { key = Object.keys(w).find(k => k.startsWith('__reactContainer$')); } catch { /* xray */ }
+      if (key) { rootFiber = w[key]; break; }
+    }
+    if (!rootFiber) return null;
+    const nameOf = f => {
+      const t = f && f.type;
+      if (!t || typeof t === 'string') return '';
+      return t.displayName || t.name || (t.render && (t.render.displayName || t.render.name)) || (t.type && (t.type.displayName || t.type.name)) || '';
+    };
+    const hostNode = f => {
+      for (let q = f, i = 0; q && i < 200; i++) {
+        if (q.tag === 5 && q.stateNode && visible(q.stateNode)) return q.stateNode;
+        q = q.child || (q === f ? null : nextOf(q, f));
+      }
+      return null;
+    };
+    const nextOf = (q, stop) => {
+      while (q && q !== stop) {
+        if (q.sibling) return q.sibling;
+        q = q.return;
+      }
+      return null;
+    };
+    const stack = [rootFiber.current || rootFiber];
+    for (let seen = 0; stack.length && seen < 30000; seen++) {
+      const f = stack.pop();
+      if (!f) continue;
+      if (want.has(nameOf(f))) {
+        const n = hostNode(f.child || f);
+        if (n) return n;
+      }
+      if (f.sibling) stack.push(f.sibling);
+      if (f.child) stack.push(f.child);
+    }
+    return null;
+  }
+
   function findTarget(a) {
     for (const s of a.selectors || []) {
       const n = firstVisible(s);
       if (n) return n;
     }
+    try {
+      const n = findByComponent(a.components);
+      if (n) return n;
+    } catch { /* not React, or not readable */ }
     if (a.pattern) {
       const p = a.pattern;
       const n = firstVisible(p);
@@ -192,18 +274,22 @@ ${CLAWD_CSS}`;
     return null;
   }
 
-  function vp() { return { w: window.innerWidth, h: window.innerHeight }; }
+  const vp = () => ({ w: window.innerWidth, h: window.innerHeight });
 
-  /** Where the sprite should stand: on the target's top edge, else bottom-right. */
-  function destination() {
+  /** Where a Clawd should stand: on its target's top edge, else along the bottom. */
+  function destination(c) {
     const { w, h } = vp();
-    let fx, fy;
-    if (target && target.isConnected) {
-      const r = target.getBoundingClientRect();
-      fx = r.left + Math.min(56, r.width / 2);
+    let fx;
+    let fy;
+    if (c.leaving) {
+      return { x: w + 40, y: c.pos ? c.pos.y : h - SPRITE_H };
+    }
+    if (c.target && c.target.isConnected) {
+      const r = c.target.getBoundingClientRect();
+      fx = r.left + Math.min(56, r.width / 2) + c.offset;
       fy = r.top > SPRITE_H + 24 ? r.top + 4 : Math.min(r.bottom, r.top + SPRITE_H + 12);
     } else {
-      fx = w - 70;
+      fx = w - 70 - c.offset * 2;
       fy = h - 14;
     }
     fx = Math.max(FOOT_X + 4, Math.min(w - (SPRITE_W - FOOT_X) - 4, fx));
@@ -211,13 +297,14 @@ ${CLAWD_CSS}`;
     return { x: fx - FOOT_X, y: fy - FOOT_Y };
   }
 
-  function placeHighlight() {
-    if (!target || !target.isConnected || !action) {
+  function placeHighlight(c) {
+    const { hl } = c;
+    if (c.leaving || !c.target || !c.target.isConnected || !c.action && c.actMood !== 'done') {
       hl.classList.remove('on');
       return;
     }
     const { w, h } = vp();
-    const r = target.getBoundingClientRect();
+    const r = c.target.getBoundingClientRect();
     const l = Math.max(2, r.left - 4);
     const t = Math.max(2, r.top - 4);
     const rr = Math.min(w - 2, r.right + 4);
@@ -230,57 +317,81 @@ ${CLAWD_CSS}`;
     hl.classList.add('on');
   }
 
-  function show(m) {
-    if (m === mood) return;
-    mood = m;
-    setMood(svg, m);
+  function setLabel(c, text) {
+    if (c.label.textContent === text) return;
+    c.label.textContent = text;
+    c.labelW = 0; // re-measure
+  }
+
+  /** Keep the caption bubble on screen when Clawd stands near an edge. */
+  function placeLabel(c) {
+    if (!c.label.textContent) return;
+    if (!c.labelW) c.labelW = c.label.offsetWidth;
+    const half = c.labelW / 2;
+    const centre = Math.max(half + 4, Math.min(vp().w - half - 4, c.pos.x + SPRITE_W / 2));
+    c.label.style.left = `${Math.round(centre - c.pos.x)}px`;
+  }
+
+  function show(c, m) {
+    if (m === c.mood) return;
+    c.mood = m;
+    setMood(c.svg, m);
+  }
+
+  function step(c, now, dt) {
+    const dest = destination(c);
+    if (!c.pos) c.pos = { x: vp().w + 20, y: dest.y }; // walk in from the right edge
+    const dx = dest.x - c.pos.x;
+    const dy = dest.y - c.pos.y;
+    const dist = Math.hypot(dx, dy);
+    const walking = dist > (c.mood === 'walk' ? 2 : 36);
+    if (walking) {
+      const s = Math.min(dist, SPEED * dt);
+      c.pos.x += dx / dist * s;
+      c.pos.y += dy / dist * s;
+      if (Math.abs(dx) > 2) c.face.classList.toggle('flip', dx < 0);
+      show(c, 'walk');
+    } else if (c.leaving) {
+      removeClawd(c);
+      return;
+    } else {
+      // Small drifts (scrolling a little) are followed without breaking into a walk.
+      if (dist > 0.5) { c.pos.x += dx * 0.3; c.pos.y += dy * 0.3; }
+      const busy = !['done', 'error', 'idle', 'wave'].includes(c.actMood);
+      if (busy && now > c.nextWater && !c.waterUntil) {
+        c.waterUntil = now + 3200;
+        c.litres += 0.5;
+        c.waterEl.textContent = `💧 ${c.litres.toFixed(1)} L`;
+        c.waterEl.classList.add('on');
+      }
+      if (c.waterUntil && now > c.waterUntil) {
+        c.waterUntil = 0;
+        c.nextWater = now + 22000 + Math.random() * 20000;
+        c.waterEl.classList.remove('on');
+        setLabel(c, c.action ? c.action.label : c.label.textContent);
+      }
+      if (c.waterUntil) {
+        setLabel(c, MOOD_LABEL.water);
+        show(c, 'water');
+      } else {
+        show(c, c.actMood);
+      }
+    }
+    c.root.style.transform = `translate(${Math.round(c.pos.x)}px, ${Math.round(c.pos.y)}px)`;
+    placeLabel(c);
+    placeHighlight(c);
   }
 
   function tick(now) {
     raf = requestAnimationFrame(tick);
     const dt = Math.min(0.05, (now - lastT) / 1000);
     lastT = now;
-    const dest = destination();
-    if (!pos) pos = { x: vp().w + 20, y: dest.y }; // walk in from the right edge
-    const dx = dest.x - pos.x;
-    const dy = dest.y - pos.y;
-    const dist = Math.hypot(dx, dy);
-    const walking = dist > (mood === 'walk' ? 2 : 36);
-    if (walking) {
-      const step = Math.min(dist, SPEED * dt);
-      pos.x += dx / dist * step;
-      pos.y += dy / dist * step;
-      if (Math.abs(dx) > 2) face.classList.toggle('flip', dx < 0);
-      show('walk');
-    } else {
-      // Small drifts (scrolling a little) are followed without breaking into a walk.
-      if (dist > 0.5) { pos.x += dx * 0.3; pos.y += dy * 0.3; }
-      const busy = !['done', 'error', 'idle'].includes(actMood);
-      if (busy && now > nextWater && !waterUntil) {
-        waterUntil = now + 3200;
-        litres += 0.5;
-        waterEl.textContent = `💧 ${litres.toFixed(1)} L`;
-        waterEl.classList.add('on');
-      }
-      if (waterUntil && now > waterUntil) {
-        waterUntil = 0;
-        nextWater = now + 22000 + Math.random() * 20000;
-        waterEl.classList.remove('on');
-        label.textContent = action ? action.label : '';
-      }
-      if (waterUntil) {
-        label.textContent = MOOD_LABEL.water;
-        show('water');
-      } else {
-        show(actMood);
-      }
-    }
-    sprite.style.transform = `translate(${Math.round(pos.x)}px, ${Math.round(pos.y)}px)`;
-    placeHighlight();
+    for (const c of [...clawds.values()]) step(c, now, dt);
   }
 
   /** Effects drawn over the element being worked on, by kind of change. */
-  function effects(a) {
+  function effects(c, a) {
+    const { fx: fxEl, hl, svg } = c;
     fxEl.replaceChildren();
     hl.classList.remove('wobble', 'bounce', 'ok');
     const color = a.color && CSS.supports('color', a.color) ? a.color : '#d97757';
@@ -309,8 +420,7 @@ ${CLAWD_CSS}`;
       el('div', 'stripes', fxEl);
       for (let i = 0; i < 6; i++) at(el('div', 'dust', fxEl), `${rnd(5, 95)}%`, 'auto').style.animationDelay = `${rnd(0, 0.9)}s`;
       break;
-    case 'remove': {
-      // bits get sucked toward Clawd's nozzle at the top-left corner
+    case 'remove':
       for (let i = 0; i < 9; i++) {
         const b = at(el('div', 'bit', fxEl), `${rnd(20, 90)}%`, `${rnd(20, 90)}%`);
         b.style.setProperty('--dx', `${-rnd(40, 160)}px`);
@@ -318,7 +428,6 @@ ${CLAWD_CSS}`;
         b.style.animationDelay = `${rnd(0, 1)}s`;
       }
       break;
-    }
     case 'write':
     case 'font': {
       el('div', 'caret', fxEl);
@@ -332,7 +441,7 @@ ${CLAWD_CSS}`;
     }
     case 'build':
       hl.classList.add('wobble');
-      ['✦', '✧', '✦'].forEach((s, i) => at(el('div', 'star', fxEl, s), `${8 + i * 6}%`, `${6 + i * 9}%`).style.animationDelay = `${i * 0.2}s`);
+      ['✦', '✧', '✦'].forEach((s, i) => { at(el('div', 'star', fxEl, s), `${8 + i * 6}%`, `${6 + i * 9}%`).style.animationDelay = `${i * 0.2}s`; });
       break;
     case 'measure':
       el('div', 'ruler', fxEl);
@@ -353,9 +462,9 @@ ${CLAWD_CSS}`;
       for (let i = 0; i < 14; i++) {
         let s = '';
         for (let j = 0; j < 14; j++) s += chars[Math.floor(Math.random() * chars.length)];
-        const c = at(el('div', 'col', fxEl, s), `${i * 7.2}%`, '0');
-        c.style.animationDelay = `${-rnd(0, 2.2)}s`;
-        c.style.animationDuration = `${rnd(1.6, 3)}s`;
+        const col = at(el('div', 'col', fxEl, s), `${i * 7.2}%`, '0');
+        col.style.animationDelay = `${-rnd(0, 2.2)}s`;
+        col.style.animationDuration = `${rnd(1.6, 3)}s`;
       }
       break;
     }
@@ -365,7 +474,7 @@ ${CLAWD_CSS}`;
       break;
     case 'dance':
       hl.classList.add('bounce');
-      ['♪', '♫', '♪'].forEach((s, i) => at(el('div', 'note', fxEl, s), `${15 + i * 30}%`, '40%').style.animationDelay = `${i * 0.45}s`);
+      ['♪', '♫', '♪'].forEach((s, i) => { at(el('div', 'note', fxEl, s), `${15 + i * 30}%`, '40%').style.animationDelay = `${i * 0.45}s`; });
       break;
     case 'photo':
       el('div', 'flash', fxEl);
@@ -381,49 +490,63 @@ ${CLAWD_CSS}`;
     }
   }
 
-  function act(a) {
-    clearTimeout(leaveTimer);
-    action = a;
+  function act(c, a) {
+    clearTimeout(c.leaveTimer);
+    c.leaving = false;
+    c.action = a;
+    c.live = !!a.live;
     const t = findTarget(a);
     if (t) {
-      target = t;
+      c.target = t;
       const r = t.getBoundingClientRect();
-      if (r.bottom < 0 || r.top > vp().h) t.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    } else if (NO_TARGET.has(a.kind)) {
-      target = null;
+      // A Clawdify job may bring its target into view; Live Clawd never moves your page.
+      if (!c.live && (r.bottom < 0 || r.top > vp().h)) t.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else if (NO_TARGET.has(a.kind) || a.kind === 'wave') {
+      c.target = null;
     } // else: keep standing at the previous target
     // Paint jobs with no element to stand on get an easel instead of a palette.
-    actMood = a.kind === 'paint' && !target ? 'canvas' : a.kind;
-    if (!nextWater) nextWater = performance.now() + 9000 + Math.random() * 9000;
-    label.textContent = a.label || '';
-    effects(a);
+    c.actMood = a.kind === 'paint' && !c.target ? 'canvas' : a.kind;
+    if (!c.nextWater) c.nextWater = performance.now() + 9000 + Math.random() * 9000;
+    setLabel(c, a.label || '');
+    effects(c, a);
   }
 
-  function finish(ok) {
-    action = null;
-    actMood = ok ? 'done' : 'error';
-    waterUntil = 0;
-    waterEl.classList.remove('on');
-    label.textContent = MOOD_LABEL[actMood];
-    fxEl.replaceChildren();
-    hl.classList.remove('wobble', 'bounce');
-    if (ok && target) {
-      hl.classList.add('ok');
-      el('div', 'ok-tick', fxEl, '✓');
+  function finish(c, ok) {
+    c.action = null;
+    c.actMood = ok ? 'done' : 'error';
+    c.waterUntil = 0;
+    c.waterEl.classList.remove('on');
+    setLabel(c, MOOD_LABEL[c.actMood]);
+    c.fx.replaceChildren();
+    c.hl.classList.remove('wobble', 'bounce');
+    if (ok && c.target) {
+      c.hl.classList.add('ok');
+      el('div', 'ok-tick', c.fx, '✓');
     }
-    clearTimeout(leaveTimer);
-    leaveTimer = setTimeout(() => {
-      layer.classList.add('out');
-      leaveTimer = setTimeout(hide, 600);
-    }, ok ? 3200 : 4200);
+    clearTimeout(c.leaveTimer);
+    c.leaveTimer = setTimeout(() => leave(c), ok ? 3200 : 4200);
+  }
+
+  function leave(c) {
+    c.action = null;
+    c.target = null;
+    setLabel(c, c.actMood === 'error' ? '' : 'Bye! 👋');
+    c.leaving = true;
   }
 
   window.__cmClawd = msg => {
-    if (!msg || msg.op === 'hide') return hide();
-    ensure();
-    if (msg.op === 'act') act(msg);
-    else if (msg.op === 'done') finish(true);
-    else if (msg.op === 'error') finish(false);
+    if (!msg || msg.op === 'hide') return hideAll();
+    const id = String(msg.id || 'job');
+    if (msg.op === 'leave') {
+      const c = clawds.get(id);
+      if (c) leave(c);
+      return;
+    }
+    ensureLayer();
+    const c = getClawd(id, msg.tag);
+    if (msg.op === 'act') act(c, msg);
+    else if (msg.op === 'done') finish(c, true);
+    else if (msg.op === 'error') finish(c, false);
   };
 }
 
