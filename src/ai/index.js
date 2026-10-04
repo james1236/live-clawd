@@ -1,5 +1,5 @@
 /**
- * ClaudeMonkey toolbar popup: a compact textbox where you describe how you want
+ * Clawdify toolbar popup: a compact textbox where you describe how you want
  * the current site changed. Submitting opens the sidebar (the live working view)
  * and kicks off a background job; the popup then closes.
  *
@@ -8,10 +8,12 @@
  */
 import '@/common/browser';
 import { sendCmdDirectly } from '@/common';
-import { clawdSvg, esc, injectTheme, siteOf } from '@/common/cm-theme';
+import { esc, injectTheme, siteOf } from '@/common/cm-theme';
+import { CLAWD_CSS, clawdSpriteHtml } from '@/common/clawd-art';
 
-injectTheme(`
+injectTheme(`${CLAWD_CSS}
 body { width: 360px; }
+.top .cw-svg { margin: -10px -6px -6px -8px; }
 .top { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; }
 .title { font-weight: 650; font-size: 14px; letter-spacing: -.01em; }
 .top .cm-chip { margin-left: auto; max-width: 190px; }
@@ -28,8 +30,8 @@ body { width: 360px; }
 
 document.body.innerHTML = `
   <div class="top">
-    ${clawdSvg(22)}
-    <div class="title">ClaudeMonkey</div>
+    ${clawdSpriteHtml(48)}
+    <div class="title">Clawdify</div>
     <span class="cm-chip" id="site">…</span>
   </div>
   <div class="main">
@@ -64,7 +66,7 @@ async function loadSite() {
   $('site').textContent = domain || 'no site';
   $('site').title = domain || '';
   if (!domain) {
-    $('ctx').textContent = 'Open an http(s) page to use ClaudeMonkey.';
+    $('ctx').textContent = 'Open an http(s) page to use Clawdify.';
     $('go').disabled = true;
     promptEl.disabled = true;
     return;
@@ -92,7 +94,7 @@ async function loadSite() {
 }
 
 function renderToggle(script, tab) {
-  $('toggle-slot').innerHTML = `<label class="cm-switch" title="Turn this site's ClaudeMonkey script on or off">
+  $('toggle-slot').innerHTML = `<label class="cm-switch" title="Turn this site's Clawdify script on or off">
     <input type="checkbox" id="enabled" ${script.enabled ? 'checked' : ''}><span class="track"></span>
     <span id="enabled-label">Script ${script.enabled ? 'on' : 'off'}</span></label>`;
   $('enabled').addEventListener('change', async e => {

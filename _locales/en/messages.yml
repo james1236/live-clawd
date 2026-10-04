@@ -238,10 +238,10 @@ editValueAllHint:
   message: Show/edit the entire script value storage
 extDescription:
   description: Description for this extension, will be displayed in web store
-  message: Describe how you want a site changed and Claude writes the userscript for you
+  message: Tell Clawd how you want any website changed, and he remodels it for you
 extName:
   description: Name of this extension.
-  message: ClaudeMonkey
+  message: Clawdify
 failureReasonBlacklisted:
   description: Shown for blacklisted URLs (in the extension icon tooltip, in the popup)
   message: Blacklisted in Violentmonkey's settings

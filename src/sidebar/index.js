@@ -1,5 +1,9 @@
 /**
- * ClaudeMonkey sidebar: the live "Claude is working" view.
+ * Clawdify sidebar: the live "Claude is working" view.
+ *
+ * Clawd stands on a little stage above the composer the whole time, acting out what
+ * Claude is doing (the same moods as the on-page overlay), taking water breaks while
+ * he works, and hopping when clicked.
  *
  * Follows the active tab of its window and shows only that site's conversation:
  * your requests, tool-use chips and Claude's narration, then the resulting
@@ -12,8 +16,10 @@
 import '@/common/browser';
 import { sendCmdDirectly } from '@/common';
 import { clawdSvg, esc, injectTheme, siteOf } from '@/common/cm-theme';
+import { CLAWD_CSS, clawdSpriteHtml, setMood } from '@/common/clawd-art';
+import { MOOD_LABEL } from '@/common/clawd-actions';
 
-injectTheme(`
+injectTheme(`${CLAWD_CSS}
 html, body { height: 100%; }
 body { display: flex; flex-direction: column; user-select: text; }
 .head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--surface); }
@@ -44,9 +50,16 @@ body { display: flex; flex-direction: column; user-select: text; }
 .script summary .cm-btn { margin-left: auto; padding: 4px 12px; font-size: 12px; }
 .script pre { margin: 0 12px 12px; max-height: 300px; overflow: auto; padding: 10px; border-radius: 8px; background: var(--code-bg); color: var(--code-fg); font: 12px/1.45 ui-monospace, Consolas, monospace; white-space: pre; tab-size: 2; -moz-tab-size: 2; }
 .composer { padding: 10px 12px 12px; border-top: 1px solid var(--border); background: var(--bg); }
-.box { position: relative; }
-.box .cm-input { padding-right: 46px; max-height: 200px; overflow: auto; }
-.send { position: absolute; right: 8px; bottom: 8px; width: 30px; height: 30px; padding: 0; border-radius: 8px; display: grid; place-items: center; }
+.box { display: flex; align-items: flex-end; gap: 6px; padding: 5px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+.box:focus-within { border-color: var(--accent); }
+.box .cm-input { flex: 1; min-height: 30px; max-height: 200px; overflow: auto; padding: 6px 4px 6px 8px; border: 0; border-radius: 0; box-shadow: none; background: transparent; line-height: 18px; }
+.send { flex: none; width: 30px; height: 30px; padding: 0; border-radius: 8px; display: grid; place-items: center; }
+.stage { position: relative; display: flex; align-items: flex-end; gap: 10px; padding: 8px 12px 4px; border-top: 1px solid var(--border); background: linear-gradient(var(--bg), var(--surface-2)); }
+.mascot { flex: none; width: 112px; cursor: pointer; user-select: none; }
+.speech { position: relative; flex: 0 1 auto; min-width: 0; margin-bottom: 30px; padding: 7px 11px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.speech::before { content: ""; position: absolute; left: -6px; bottom: 10px; width: 10px; height: 10px; background: var(--surface); border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); transform: rotate(45deg); }
+.waterc { position: absolute; right: 12px; top: 6px; font-size: 11px; color: #3a7bd5; }
+.waterc:empty { display: none; }
 .under { display: flex; align-items: center; margin-top: 6px; }
 .under .cm-btn-ghost { margin-left: auto; }
 `);
@@ -55,12 +68,17 @@ document.body.innerHTML = `
   <div class="head">
     ${clawdSvg(24)}
     <div class="who">
-      <div class="site" id="site">ClaudeMonkey</div>
+      <div class="site" id="site">Clawdify</div>
       <div class="status" id="status"></div>
     </div>
   </div>
   <div class="banner" id="banner"></div>
   <div class="log" id="log"></div>
+  <div class="stage">
+    <div class="mascot" id="mascot" title="Hi, I'm Clawd!">${clawdSpriteHtml(112)}</div>
+    <div class="speech" id="speech">Hi!</div>
+    <div class="waterc" id="waterc" title="Water guzzled so far (it's a joke)"></div>
+  </div>
   <div id="result"></div>
   <div class="composer">
     <div class="box">
@@ -83,6 +101,94 @@ let domain = null;
 let tabUrl = '';
 let state = null;
 let codeOpen = false;
+
+// ---------------------------------------------------------------------------
+// Clawd on the stage
+// ---------------------------------------------------------------------------
+
+const mascotEl = $('mascot');
+const spriteEl = mascotEl.querySelector('svg');
+const LITRES_KEY = 'clawdify-litres';
+let stageMood = 'idle';
+let stageText = '';
+let busy = false;
+let waterUntil = 0;
+let nextWater = 0;
+let litres = 0;
+try { litres = +localStorage.getItem(LITRES_KEY) || 0; } catch { /* storage blocked */ }
+let poked = false;
+const HELLOS = ['Hi! I’m Clawd 👋', 'That tickles!', 'Ready to remodel the web!', '*happy pixel noises*', 'Need anything changed?'];
+
+function showWater() {
+  $('waterc').textContent = litres ? `💧 ${litres.toFixed(1)} L guzzled` : '';
+}
+showWater();
+
+function paintStage() {
+  const drinking = waterUntil > Date.now();
+  setMood(spriteEl, drinking ? 'water' : stageMood, poked ? 'cw-poke' : '');
+  $('speech').textContent = drinking ? MOOD_LABEL.water : stageText;
+}
+
+function setStage(mood, text, color) {
+  stageMood = mood;
+  stageText = text;
+  if (color) mascotEl.style.setProperty('--paint', color);
+  paintStage();
+}
+
+mascotEl.addEventListener('click', () => {
+  poked = true;
+  const before = stageText;
+  if (!busy) stageText = HELLOS[Math.floor(Math.random() * HELLOS.length)];
+  paintStage();
+  setTimeout(() => {
+    poked = false;
+    if (!busy && stageText !== before) stageText = before;
+    paintStage();
+  }, 1400);
+});
+
+// Water breaks while working: AI is thirsty work.
+setInterval(() => {
+  const now = Date.now();
+  if (waterUntil && now > waterUntil) {
+    waterUntil = 0;
+    paintStage();
+  }
+  if (!busy) { nextWater = 0; return; }
+  if (!nextWater) nextWater = now + 8000 + Math.random() * 8000;
+  if (!waterUntil && now > nextWater) {
+    waterUntil = now + 3000;
+    nextWater = now + 25000 + Math.random() * 20000;
+    litres += 0.5;
+    try { localStorage.setItem(LITRES_KEY, String(litres)); } catch { /* ignore */ }
+    showWater();
+    paintStage();
+  }
+}, 500);
+
+/** Decide what Clawd is doing from the site's state. */
+function stageFor(thread, running, busyHere) {
+  const last = thread[thread.length - 1];
+  if (!domain) return ['idle', 'Open a web page and I’ll remodel it for you!'];
+  if (busyHere && last) {
+    for (let i = last.events.length - 1; i >= 0; i--) {
+      const ev = last.events[i];
+      if (ev.type === 'tool' && ev.kind) return [ev.kind === 'paint' ? 'canvas' : ev.kind, ev.label || ev.summary, ev.color];
+      if (ev.type === 'note') return ['think', ev.text];
+      if (ev.type === 'narration') return ['think', 'Thinking it over…'];
+    }
+    return ['think', 'Getting started…'];
+  }
+  if (running) return ['walk', `Busy over on ${running.domain}…`];
+  const ago = last && last.endedAt ? Date.now() - last.endedAt : Infinity;
+  if (last && last.status === 'error' && ago < 9000) return ['error', MOOD_LABEL.error];
+  if (last && last.status === 'done' && ago < 7000) return ['done', `${MOOD_LABEL.done} ✨`];
+  if (thread.length) return ['idle', `Anything else for ${domain}?`];
+  if (state && state.script) return ['idle', `I’ve already tuned ${domain}. Want more changes?`];
+  return ['idle', `Hi! Tell me how to change ${domain}.`];
+}
 
 /** Group consecutive tool events so a run of Read/Grep calls renders as one chip row. */
 function renderEvents(events) {
@@ -121,7 +227,7 @@ function setStatus(cls, html) {
 }
 
 function render() {
-  $('site').textContent = domain || 'ClaudeMonkey';
+  $('site').textContent = domain || 'Clawdify';
   $('site').title = tabUrl;
   const thread = (state && state.thread) || [];
   const last = thread[thread.length - 1];
@@ -144,15 +250,21 @@ function render() {
     banner.style.display = 'none';
   }
 
+  // Clawd.
+  busy = !!busyHere;
+  const [mood, text, color] = stageFor(thread, running, busyHere);
+  setStage(mood, text, color);
+  if (mood === 'done' || mood === 'error') setTimeout(refresh, mood === 'done' ? 7200 : 9200);
+
   // Conversation.
   const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
   if (!domain) {
-    logEl.innerHTML = `<div class="empty">${clawdSvg(48)}<div>Open a web page to change it with Claude.</div></div>`;
+    logEl.innerHTML = `<div class="empty"><div>Open a web page to change it with Claude.</div></div>`;
   } else if (!thread.length) {
-    logEl.innerHTML = `<div class="empty">${clawdSvg(48)}
+    logEl.innerHTML = `<div class="empty">
       <div><b>${esc(domain)}</b></div>
       <div>${state && state.script
-        ? 'This site already has a ClaudeMonkey script. Describe a change and Claude will edit it.'
+        ? 'This site already has a Clawdify script. Describe a change and Claude will edit it.'
         : 'Describe how you want this site to look or behave, and Claude will write a userscript for it.'}</div></div>`;
   } else {
     logEl.innerHTML = thread.map(renderTurn).join('');
@@ -232,7 +344,7 @@ browser.tabs.onUpdated.addListener((tabId, info, tab) => {
 
 function autosize() {
   inputEl.style.height = 'auto';
-  inputEl.style.height = `${Math.min(inputEl.scrollHeight + 2, 200)}px`;
+  inputEl.style.height = `${Math.min(inputEl.scrollHeight, 200)}px`;
 }
 inputEl.addEventListener('input', autosize);
 

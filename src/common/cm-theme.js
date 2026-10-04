@@ -1,5 +1,5 @@
 /**
- * Shared look for the ClaudeMonkey popup and sidebar: warm Claude-style palette,
+ * Shared look for the Clawdify popup and sidebar: warm Claude-style palette,
  * light/dark via prefers-color-scheme, and the pixel-art Clawd mark.
  */
 

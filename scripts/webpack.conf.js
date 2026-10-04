@@ -99,6 +99,12 @@ module.exports = [
     }));
   }),
 
+  // Clawdify's animated mascot, injected into the tab being edited on demand.
+  buildConfig('clawd-overlay', './src/clawd-overlay', (config) => {
+    // Injected with a single executeScript, so everything must be in this one file.
+    config.optimization = { ...config.optimization, splitChunks: false, runtimeChunk: false };
+  }),
+
   buildConfig('injected-web', './src/injected/web', (config) => {
     config.output.libraryTarget = 'commonjs2';
     config.plugins.push(new ProtectWebpackBootstrapPlugin());

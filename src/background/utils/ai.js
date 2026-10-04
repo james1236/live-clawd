@@ -1,5 +1,5 @@
 /**
- * ClaudeMonkey AI bridge (background side).
+ * Clawdify (ClaudeMonkey) AI bridge (background side).
  *
  * Owns the native-messaging port to the local `claudemonkey.bridge` host, runs
  * one "generate" job at a time, captures a trimmed DOM snapshot of the active
@@ -15,6 +15,7 @@ import { sendCmd, getActiveTab } from '@/common';
 import { addOwnCommands } from './init';
 import storage, { S_CODE } from './storage';
 import { getScripts, parseScript } from './db';
+import { classifyTool } from '@/common/clawd-actions';
 
 const HOST_NAME = 'claudemonkey.bridge';
 const NS = 'claudemonkey';
@@ -213,9 +214,13 @@ function onPortMessage(msg) {
     case 'narration':
       job.events.push({ type: 'narration', text: msg.text });
       break;
-    case 'tool':
-      job.events.push({ type: 'tool', name: msg.name, summary: msg.summary });
+    case 'tool': {
+      const action = classifyTool(msg.name, msg.detail);
+      job.events.push({ type: 'tool', name: msg.name, summary: msg.summary, kind: action.kind, label: action.label, color: action.color });
+      clawd(job, { op: 'act', ...action });
+      delete msg.detail; // UI pages re-pull state; no need to broadcast the code
       break;
+    }
     case 'done': {
       // End of one Claude pass. Accumulate its output and hand control back to the
       // verify loop, which decides whether to apply/test/resume or finalize.
@@ -269,6 +274,8 @@ async function getCurrentCode(domain) {
  */
 async function captureContext(tab) {
   let parsed = { stripped: '', styled: '', resources: [] };
+  // Keep the mascot out of the DOM snapshot and screenshot Claude gets.
+  await clawdNow(tab.id, { op: 'hide' });
   try {
     const res = await browser.tabs.executeScript(tab.id, { code: CAPTURE_SNIPPET });
     const raw = (Array.isArray(res) ? res[0] : res) || '';
@@ -366,7 +373,7 @@ addOwnCommands({
   async AIGenerate({ prompt } = {}) {
     const tab = await getActiveTab();
     if (!tab || !tab.url || !/^https?:/.test(tab.url)) {
-      throw 'ClaudeMonkey only works on http(s) pages.';
+      throw 'Clawdify only works on http(s) pages.';
     }
     const url = tab.url;
     let domain;
@@ -407,6 +414,7 @@ addOwnCommands({
       broadcastNote(job, `Capturing ${domain}…`);
       const context = await captureContext(tab);
       broadcastNote(job, `Done capturing ${domain}.`);
+      clawd(job, { op: 'act', kind: 'read', selectors: [], label: 'Studying the page' });
       await runVerifyLoop(job, { prompt, context, currentScript });
     })().catch(e => {
       finalize(job, { error: String((e && (e.stack || e.message)) || e) });
@@ -640,20 +648,59 @@ function buildFeedbackPrompt(obs) {
 
 async function finalize(job, res) {
   job._resolveDone = null;
+  job.endedAt = Date.now();
   if (res && res.error) {
     job.status = 'error';
     job.error = res.error;
+    clawd(job, { op: 'error' });
   } else {
     job.status = 'done';
     job.error = null;
     // Ensure the converged script is the one actually installed and live.
     try { await parseScript({ [S_CODE]: job.script || '', url: job.url, reloadTab: true }); } catch { /* leave last-applied */ }
+    // That reload wipes the mascot; bring it back to celebrate on the finished page.
+    waitTabLoaded(job.tabId).then(() => clawd(job, { op: 'done' }));
   }
   broadcast(job, { type: 'done', error: job.error, script: job.script });
 }
 
+// ---------------------------------------------------------------------------
+// Clawd, the on-page mascot (src/clawd-overlay)
+// ---------------------------------------------------------------------------
+
+/** Queue a message for the job's tab, in order, if it's still showing the job's site. */
+function clawd(job, msg) {
+  job._clawdQ = (job._clawdQ || Promise.resolve()).then(async () => {
+    try {
+      const tab = await browser.tabs.get(job.tabId);
+      if (new URL(tab.url).hostname !== job.domain) return;
+    } catch {
+      return;
+    }
+    await clawdNow(job.tabId, msg);
+  });
+}
+
+async function clawdNow(tabId, msg) {
+  try {
+    await browser.tabs.executeScript(tabId, { file: '/clawd-overlay.js' });
+    await browser.tabs.executeScript(tabId, { code: `window.__cmClawd && window.__cmClawd(${JSON.stringify(msg)}); 0` });
+  } catch { /* restricted page, closed tab, ... */ }
+}
+
+async function waitTabLoaded(tabId, timeout = 10000) {
+  await delay(300); // let the reload begin
+  for (const end = Date.now() + timeout; Date.now() < end; await delay(200)) {
+    try {
+      if ((await browser.tabs.get(tabId)).status === 'complete') return;
+    } catch {
+      return;
+    }
+  }
+}
+
 function broadcastNote(job, text) {
-  // 'note' = ClaudeMonkey's own progress line, rendered apart from Claude's narration.
+  // 'note' = Clawdify's own progress line, rendered apart from Claude's narration.
   job.events.push({ type: 'note', text });
   broadcast(job, { type: 'narration', text });
 }
@@ -676,5 +723,6 @@ function fullJob(job) {
     script: job.script,
     error: job.error,
     cost: job.cost || 0,
+    endedAt: job.endedAt || 0,
   };
 }

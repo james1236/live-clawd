@@ -2,7 +2,7 @@ name: __MSG_extName__
 version: __VERSION__
 manifest_version: 2
 description: __MSG_extDescription__
-author: ClaudeMonkey (fork of Violentmonkey by Gerald)
+author: Clawdify (ClaudeMonkey fork of Violentmonkey by Gerald)
 homepage_url: 'https://github.com/violentmonkey/violentmonkey'
 icons:
   '16': public/images/icon16.png
@@ -20,7 +20,7 @@ browser_action:
   default_title: __MSG_extName__
   default_popup: ai/index.html
 sidebar_action:
-  default_title: ClaudeMonkey
+  default_title: Clawdify
   default_panel: sidebar/index.html
   default_icon:
     '16': public/images/icon16b.png

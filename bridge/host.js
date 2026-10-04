@@ -170,6 +170,23 @@ function summarizeTool(c) {
 }
 
 /**
+ * What a tool call touched, for the extension's animated mascot: the edited code (so it
+ * can tell a colour change from a layout change and find the selectors), the grep
+ * pattern, or the file read. Capped so a big Write doesn't bloat the message.
+ */
+function toolDetail(c) {
+  const input = c.input || {};
+  let d = '';
+  if (c.name === 'Edit') d = input.new_string;
+  else if (c.name === 'MultiEdit') d = (input.edits || []).map(e => e && e.new_string).join('\n');
+  else if (c.name === 'Write') d = input.content;
+  else if (c.name === 'Grep') d = input.pattern;
+  else if (c.name === 'Read') d = input.file_path ? path.basename(input.file_path) : '';
+  else if (c.name === 'Bash') d = input.command;
+  return String(d || '').slice(0, 8000);
+}
+
+/**
  * Write fetched external CSS/JS into <dir>/assets/ and return a normalized list for
  * the manifest. Entries that carry `content` are (re)written; metadata-only entries
  * (sent on verify rounds) are kept in the manifest but their files are left as-is.
@@ -468,7 +485,7 @@ function relay(ev, requestId, state) {
         if (c.name === 'Edit' || c.name === 'Write') state.edits += 1;
         const summary = summarizeTool(c);
         state.transcript.push({ kind: 'tool', name: c.name, summary });
-        sendMessage({ type: 'tool', requestId, name: c.name, summary });
+        sendMessage({ type: 'tool', requestId, name: c.name, summary, detail: toolDetail(c) });
       }
     }
   } else if (ev.type === 'result') {
