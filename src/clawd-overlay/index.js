@@ -2,16 +2,20 @@
  * Clawd on the page: injected (tabs.executeScript) into the tab a Clawdify job is
  * editing, and — Live Clawd — into localhost tabs of a project a Claude Code session in
  * WSL is working on. The background calls `window.__cmClawd(msg)` with:
- *   {op: 'act', id, kind, selectors, components, pattern, color, measure, label,
- *    tag, live}           walk to the element the change touches and act it out
- *   {op: 'done' | 'error', id}  celebrate / droop, then walk off
- *   {op: 'leave', id}     walk off now
+ *   {op: 'play', id, steps: [{target, kind, say, ms, color}], tag, color, live}
+ *       queue a choreography (from Claude's `clawd` tool). Returns {ghosts, dpr}: boxes
+ *       of elements about to be removed, which the background snapshots and sends back
+ *   {op: 'ghosts', id, ghosts: [{step, rect, src}]}  those snapshots
+ *   {op: 'act', id, kind, selectors, components, pattern, label, …}  a guessed action
+ *       (Clawdify jobs, hook fallbacks): shown only while no choreography is playing
+ *   {op: 'done' | 'error', id}  celebrate / droop after the queue, then walk off
+ *   {op: 'leave', id}     walk off once the queue is done
  *   {op: 'hide'}          remove every Clawd at once (before DOM snapshots/screenshots)
- * `id` names a Clawd (one per job / Claude session), so several can share a page, each
- * in its own colour with a name tag. Live Clawds never scroll the page.
+ * One Clawd per `id`, in its own colour with a name tag. Live Clawds never scroll.
  *
- * Everything lives in a closed shadow root on a fixed, click-through layer, built with
- * DOM APIs (no innerHTML) so it works on pages enforcing Trusted Types.
+ * Everything lives in a closed shadow root on a fixed, click-through layer (only
+ * Clawd's body takes clicks: tickle him, or dismiss him while he waves a sign), built
+ * with DOM APIs (no innerHTML) so it works on pages enforcing Trusted Types.
  */
 import { CLAWD_CSS, VIEWBOX, clawdSpriteNode, eyeOffset, lookAt, setMood, tossBottle } from '@/common/clawd-art';
 import { MOOD_LABEL } from '@/common/clawd-actions';
@@ -22,60 +26,49 @@ function install() {
   const SPRITE_H = Math.round(UNIT * VIEWBOX.h);
   const FOOT_X = (8 - VIEWBOX.x) * UNIT; // Clawd's centre, from sprite's left
   const FOOT_Y = (10 - VIEWBOX.y) * UNIT; // Clawd's feet, from sprite's top
-  const SPEED = 520; // px/s walking
-  const NO_TARGET = new Set(['think', 'read', 'fetch', 'hack', 'stash']);
+  const HAND = { x: 6 * UNIT, y: 5 * UNIT }; // his working hand, relative to his feet
+  const SPEED = 420; // px/s walking
+  const RUN = 900; // px/s on long trips
+  const BELOW = 38; // room under his feet for the name tag and water counter
+  const NEAR = 190; // px: eyes follow the cursor within this
+  const GUESS_MS = 2200; // how long a guessed action shows
+  const EYES = eyeOffset(SPRITE_W);
+  const TICKLES = ['Hehe! 😆', 'Hahaha, stop it!', 'I’m trying to work here! 😂', 'OK OK, you win! 🏳️'];
 
   const STYLE = `
 :host { all: initial; }
 * { box-sizing: border-box; }
 .layer { position: fixed; inset: 0; pointer-events: none; overflow: hidden; font: 12px/1.3 system-ui, sans-serif;
   --clawd: #d97757; --clawd-eye: #1f1e1d; --accent: #d97757; }
-.layer.out { opacity: 0; transition: opacity .5s; }
-.hl { position: absolute; display: none; border: 2px dashed var(--accent); border-radius: 6px;
-  background: rgba(217, 119, 87, .06); box-shadow: 0 0 0 4px rgba(217, 119, 87, .12); overflow: hidden;
-  transition: border-color .3s, background .3s; }
-.hl.on { display: block; }
-.hl.ok { border-color: #4f9a45; border-style: solid; background: rgba(79, 154, 69, .12); }
+/* the thing he's working on: a soft glow that glides between targets */
+.glow { position: absolute; left: 0; top: 0; border-radius: 12px; opacity: 0; transition: opacity .35s;
+  border: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  box-shadow: 0 0 22px 3px color-mix(in srgb, var(--accent) 35%, transparent); will-change: transform, width, height; }
+.glow.on { opacity: 1; }
+.glow.ok { border-color: rgba(79, 154, 69, .8); box-shadow: 0 0 22px 3px rgba(79, 154, 69, .4); }
+.fxbox { position: absolute; left: 0; top: 0; overflow: hidden; border-radius: 10px; opacity: 0; transition: opacity .3s; }
+.fxbox.on { opacity: 1; }
+.fx { position: absolute; inset: 0; }
+.ghost { position: absolute; left: 0; top: 0; transform-origin: 0 0; transition: transform 1.1s cubic-bezier(.6, 0, .9, .5), opacity 1.1s ease-in; }
 .sprite { position: absolute; left: 0; top: 0; width: ${SPRITE_W}px; height: ${SPRITE_H}px; will-change: transform;
   filter: drop-shadow(0 2px 2px rgba(0,0,0,.25)); }
-.clip, .face, .turn { position: absolute; inset: 0; }
-.turn { transition: transform .15s; }
+.turn { position: absolute; inset: 0; transition: transform .15s; }
 .turn.flip { transform: scaleX(-1); }
 .turn.flip .cw-sign-text { transform: scaleX(-1); transform-origin: 16.7px 0; } /* keep signs readable */
-/* the clickable bit: just Clawd's body, so he doesn't swallow clicks around him */
 .hit { position: absolute; left: ${(3 - VIEWBOX.x) * UNIT}px; top: ${(0 - VIEWBOX.y) * UNIT}px;
   width: ${10 * UNIT}px; height: ${10 * UNIT}px; pointer-events: auto; cursor: pointer; }
-/* portal-gun entrances and exits: he rises out of / sinks into a swirling green portal */
-.portal { position: absolute; left: ${FOOT_X - 44}px; top: ${FOOT_Y - 9}px; width: 88px; height: 20px; border-radius: 50%;
-  background: radial-gradient(ellipse at center, #fff3dc 0 16%, #ffb347 38%, #ff7a00 62%, rgba(255,122,0,0) 72%);
-  box-shadow: 0 0 16px 5px rgba(255,140,0,.6); transform: scale(0, .3); opacity: 0; overflow: hidden;
-  transition: transform .28s cubic-bezier(.3, 1.6, .6, 1), opacity .2s; }
-.portal::after { content: ""; position: absolute; inset: 2px 6px; border-radius: 50%;
-  background: conic-gradient(rgba(255,255,255,.7), transparent 30%, rgba(255,255,255,.45) 55%, transparent 80%); animation: spin .5s linear infinite; }
-.portal.open { transform: scale(1, 1); opacity: 1; }
-/* Blue to leave, orange to arrive. */
-.portal.blue { background: radial-gradient(ellipse at center, #e3f1ff 0 16%, #63b3ff 38%, #1f6fff 62%, rgba(31,111,255,0) 72%);
-  box-shadow: 0 0 16px 5px rgba(50,140,255,.6); }
-.shot { position: absolute; left: 0; top: 0; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%;
-  background: #e3f1ff; box-shadow: 0 0 6px 3px #3d8bff, 0 0 14px 6px rgba(61,139,255,.5); transition: transform .18s linear; }
-.sprite.emerging .clip, .sprite.sinking .clip { clip-path: inset(-300px -300px ${SPRITE_H - FOOT_Y}px -300px); }
-@keyframes emerge { from { transform: translateY(${Math.round(FOOT_Y)}px); } to { transform: none; } }
-@keyframes sink { from { transform: none; } to { transform: translateY(${Math.round(FOOT_Y + 8)}px); } }
-.sprite.emerging .face { animation: emerge .5s cubic-bezier(.2, .9, .3, 1.2) .22s both; }
-.sprite.sinking .face { animation: sink .45s ease-in forwards; }
-.sprite.emerging .label, .sprite.emerging .tag, .sprite.emerging .water,
-.sprite.sinking .label, .sprite.sinking .tag, .sprite.sinking .water { opacity: 0; transition: opacity .15s; }
 .label { position: absolute; left: 50%; bottom: calc(100% + 2px); transform: translateX(-50%); white-space: nowrap;
-  max-width: 260px; overflow: hidden; text-overflow: ellipsis; padding: 3px 9px; border-radius: 10px;
+  max-width: 280px; overflow: hidden; text-overflow: ellipsis; padding: 3px 9px; border-radius: 10px;
   background: #1f1e1d; color: #faf9f5; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
 .label:empty { display: none; }
-.water { position: absolute; left: 50%; top: calc(100% + 2px); transform: translateX(-50%); white-space: nowrap;
+.tag { position: absolute; left: 50%; top: calc(100% + 1px); transform: translateX(-50%); white-space: nowrap;
+  font-size: 10px; font-weight: 600; color: #faf9f5; background: var(--clawd); border-radius: 7px; padding: 0 6px; opacity: .92; }
+.tag:empty { display: none; }
+.water { position: absolute; left: 50%; top: calc(100% + 17px); transform: translateX(-50%); white-space: nowrap;
   font-size: 10px; color: #3a7bd5; background: rgba(255,255,255,.9); border-radius: 8px; padding: 1px 6px; display: none; }
 .water.on { display: block; }
-.tag { position: absolute; left: 50%; top: calc(100% + 1px); transform: translateX(-50%); white-space: nowrap;
-  font-size: 10px; font-weight: 600; color: #faf9f5; background: var(--clawd); border-radius: 7px; padding: 0 6px; opacity: .9; }
-.tag:empty { display: none; }
-.tag + .water { top: calc(100% + 17px); }
+.tag:empty + .water { top: calc(100% + 2px); }
 
 /* effects inside the highlight box */
 .fx { position: absolute; inset: 0; }
@@ -96,7 +89,7 @@ function install() {
 @keyframes pop { 0% { transform: translateY(6px) scale(.5); opacity: 0; } 30% { transform: none; opacity: 1; } 100% { transform: translateY(-14px); opacity: 0; } }
 .glyph { position: absolute; font: 700 16px Georgia, serif; color: #1f1e1d; animation: pop 1.6s ease-out infinite; }
 @keyframes wobble { 0%, 100% { transform: scale(1); } 30% { transform: scale(1.02, .98); } 60% { transform: scale(.99, 1.01); } }
-.hl.wobble { animation: wobble .7s infinite; }
+.fxbox.wobble { animation: wobble .7s infinite; }
 .star { position: absolute; font-size: 16px; color: #f2c94c; animation: blink .7s steps(2) infinite; text-shadow: 0 0 4px #fff; }
 .ruler { position: absolute; left: 0; right: 0; top: 50%; height: 0; border-top: 2px solid #3a7bd5; }
 .ruler::before, .ruler::after { content: ""; position: absolute; top: -7px; width: 2px; height: 12px; background: #3a7bd5; }
@@ -109,7 +102,7 @@ function install() {
 @keyframes ping { 0% { transform: translate(-50%, -50%) scale(0); opacity: .8; } 100% { transform: translate(-50%, -50%) scale(1); opacity: 0; } }
 .radar { position: absolute; left: 50%; top: 50%; width: 160%; aspect-ratio: 1; border: 2px solid #4f9a45; border-radius: 50%; animation: ping 1.8s ease-out infinite; }
 @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
-.hl.bounce { animation: bounce .5s ease-in-out infinite; }
+.fxbox.bounce { animation: bounce .5s ease-in-out infinite; }
 .note { position: absolute; font-size: 18px; color: var(--accent); animation: pop 1.4s ease-out infinite; }
 @keyframes flash { 0%, 80%, 100% { opacity: 0; } 84% { opacity: .9; } }
 .flash { position: absolute; inset: 0; background: #fff; animation: flash 1.6s infinite; }
@@ -122,19 +115,16 @@ function install() {
 ${CLAWD_CSS}`;
 
   const COLORS = ['#d97757', '#5b8fd9', '#4fa36b', '#a777d6', '#d9a13b', '#d0607e'];
-  const BELOW = 38; // room under his feet for the name tag and water counter
-  const EYES = eyeOffset(SPRITE_W);
-  const NEAR = 190; // px: eyes follow the cursor within this
-  const TICKLES = ['Hehe! 😆', 'Hahaha, stop it!', 'I’m trying to work here! 😂', 'OK OK, you win! 🏳️'];
-  let mouse = null;
-  window.addEventListener('mousemove', e => { mouse = { x: e.clientX, y: e.clientY }; }, { passive: true, capture: true });
-  document.addEventListener('mouseleave', () => { mouse = null; }, { passive: true });
   let host, layer;
   let raf = 0;
   let lastT = 0;
   /** @type {Map<string, object>} */
   const clawds = new Map();
   let colorIx = 0;
+  let stepSeq = 0;
+  let mouse = null;
+  window.addEventListener('mousemove', e => { mouse = { x: e.clientX, y: e.clientY }; }, { passive: true, capture: true });
+  document.addEventListener('mouseleave', () => { mouse = null; }, { passive: true });
 
   const el = (tag, cls, parent, text) => {
     const n = document.createElement(tag);
@@ -143,6 +133,8 @@ ${CLAWD_CSS}`;
     if (parent) parent.appendChild(n);
     return n;
   };
+  const vp = () => ({ w: window.innerWidth, h: window.innerHeight });
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
   function ensureLayer() {
     if (!host) {
@@ -166,59 +158,13 @@ ${CLAWD_CSS}`;
   function hideAll() {
     cancelAnimationFrame(raf);
     raf = 0;
-    for (const c of clawds.values()) { clearTimeout(c.leaveTimer); c.root.remove(); c.hl.remove(); }
+    for (const c of clawds.values()) dropDom(c);
     clawds.clear();
     if (host) host.remove();
   }
 
-  function getClawd(id, tag) {
-    let c = clawds.get(id);
-    if (c) return c;
-    const hl = el('div', 'hl', layer);
-    const root = el('div', 'sprite', layer);
-    const color = COLORS[colorIx++ % COLORS.length];
-    root.style.setProperty('--clawd', color);
-    hl.style.setProperty('--accent', color);
-    const portal = el('div', 'portal', root);
-    const clip = el('div', 'clip', root);
-    const face = el('div', 'face', clip);
-    const turn = el('div', 'turn', face);
-    const svg = clawdSpriteNode(document, SPRITE_W);
-    turn.appendChild(svg);
-    const hit = el('div', 'hit', root);
-    c = {
-      id, hl, root, face, turn, svg, portal,
-      fx: el('div', 'fx', hl),
-      label: el('div', 'label', root),
-      tagEl: el('div', 'tag', root, tag || ''),
-      waterEl: el('div', 'water', root),
-      target: null, action: null, pos: null, mood: 'idle', actMood: 'idle',
-      leaveTimer: 0, leaving: false, live: false,
-      waterUntil: 0, nextWater: 0, litres: 0, throwUntil: 0,
-      phase: null, phaseAt: 0, then: null,
-      lastRect: null, lostAt: 0, retryUntil: 0, retryAt: 0,
-      tickleUntil: 0, tickles: 0, lastTickle: 0, noticeUntil: 0, near: false, extra: '',
-    };
-    const stop = e => { e.stopPropagation(); e.preventDefault(); };
-    hit.addEventListener('mousedown', stop);
-    hit.addEventListener('click', e => {
-      stop(e);
-      // A Clawd waving for attention is dismissed by a click (until Claude has news).
-      if (c.actMood === 'wave' && !c.leaving) {
-        c.dismissed = true;
-        c.action = null;
-        c.actMood = 'idle';
-        setLabel(c, 'OK, I’ll wait 👍');
-        clearTimeout(c.leaveTimer);
-        c.leaveTimer = setTimeout(() => leave(c), 700);
-      } else {
-        tickle(c);
-      }
-    });
-    // Later Clawds stand a little to the side so they don't stack exactly.
-    c.offset = (clawds.size % 3) * 40;
-    clawds.set(id, c);
-    return c;
+  function dropDom(c) {
+    for (const n of [c.root, c.glow, c.box, ...c.ghosts]) n.remove();
   }
 
   /** Tell the extension a Clawd has left this page (so the sidebar can have him back). */
@@ -231,12 +177,53 @@ ${CLAWD_CSS}`;
   }
 
   function removeClawd(c) {
-    clearTimeout(c.leaveTimer);
-    c.root.remove();
-    c.hl.remove();
+    dropDom(c);
     clawds.delete(c.id);
     reportGone(c);
     if (!clawds.size) hideAll();
+  }
+
+  function setColor(c, color) {
+    if (!color || color === c.color) return;
+    c.color = color;
+    c.root.style.setProperty('--clawd', color);
+    c.glow.style.setProperty('--accent', color);
+    c.box.style.setProperty('--accent', color);
+  }
+
+  function getClawd(id, msg) {
+    let c = clawds.get(id);
+    if (!c) {
+      const glow = el('div', 'glow', layer);
+      const box = el('div', 'fxbox', layer);
+      const root = el('div', 'sprite', layer);
+      const turn = el('div', 'turn', root);
+      const svg = clawdSpriteNode(document, SPRITE_W);
+      turn.appendChild(svg);
+      const hit = el('div', 'hit', root);
+      c = {
+        id, glow, box, root, turn, svg,
+        fx: el('div', 'fx', box),
+        hl: box, // effects() animates this one
+        label: el('div', 'label', root),
+        tagEl: el('div', 'tag', root),
+        waterEl: el('div', 'water', root),
+        queue: [], cur: null, ghosts: [],
+        pos: null, mood: 'idle', extra: '', idleMood: 'idle', glowRect: null, boxRect: null,
+        leaving: false, endAfterQueue: null, lastWork: 0,
+        waterUntil: 0, nextWater: 0, litres: 0, throwUntil: 0,
+        tickleUntil: 0, tickles: 0, lastTickle: 0, noticeUntil: 0, near: false,
+        offset: (clawds.size % 3) * 44, // later Clawds stand a little to the side
+      };
+      const stop = e => { e.stopPropagation(); e.preventDefault(); };
+      hit.addEventListener('mousedown', stop);
+      hit.addEventListener('click', e => { stop(e); click(c); });
+      clawds.set(id, c);
+      setColor(c, msg.color || COLORS[colorIx++ % COLORS.length]);
+    }
+    if (msg.color) setColor(c, msg.color);
+    if (msg.tag != null) c.tagEl.textContent = msg.tag;
+    return c;
   }
 
   function visible(n) {
@@ -319,58 +306,76 @@ ${CLAWD_CSS}`;
     return null;
   }
 
-  function findTarget(a) {
-    for (const s of a.selectors || []) {
-      const n = firstVisible(s);
-      if (n) return n;
-    }
-    try {
-      const n = findByComponent(a.components);
-      if (n) return n;
-    } catch { /* not React, or not readable */ }
-    if (a.pattern) {
-      const p = a.pattern;
-      const n = firstVisible(p);
-      if (n) return n;
-      const tokens = (p.match(/[A-Za-z][\w-]{2,}/g) || []).slice(0, 6);
-      for (const t of tokens) {
-        const m = firstVisible(`#${CSS.escape(t)}`) || firstVisible(`.${CSS.escape(t)}`)
-          || firstVisible(`[class*="${t}" i]`) || firstVisible(`[id*="${t}" i]`);
-        if (m) return m;
+  /**
+   * The element a step is about: a component, selector, test id, visible text (from
+   * Claude's `clawd` call) or the guessed selectors/components/grep pattern.
+   */
+  function resolve(step) {
+    const t = step.target || {};
+    const tries = [];
+    if (t.testid) tries.push(() => firstVisible(`[data-testid="${CSS.escape(t.testid)}"]`));
+    if (t.selector) tries.push(() => firstVisible(t.selector));
+    if (t.component) tries.push(() => findByComponent([t.component]));
+    if (t.text) tries.push(() => findByText(t.text));
+    for (const s of step.selectors || []) tries.push(() => firstVisible(s));
+    if (step.components && step.components.length) tries.push(() => findByComponent(step.components));
+    if (step.pattern) {
+      tries.push(() => firstVisible(step.pattern));
+      for (const tok of (step.pattern.match(/[A-Za-z][\w-]{2,}/g) || []).slice(0, 6)) {
+        tries.push(() => firstVisible(`#${CSS.escape(tok)}`) || firstVisible(`.${CSS.escape(tok)}`)
+          || firstVisible(`[class*="${tok}" i]`) || firstVisible(`[id*="${tok}" i]`));
       }
-      return findByText(p.replace(/\\[sdwb]|[\\^$.*+?()[\]{}|]/g, ' ').trim().split(/\s{2,}/)[0]);
+      tries.push(() => findByText(step.pattern.replace(/\\[sdwb]|[\\^$.*+?()[\]{}|]/g, ' ').trim().split(/\s{2,}/)[0]));
+    }
+    for (const f of tries) {
+      try {
+        const n = f();
+        if (n) return n;
+      } catch { /* bad selector, unreadable fibers, … */ }
     }
     return null;
   }
 
-  const vp = () => ({ w: window.innerWidth, h: window.innerHeight });
+  const hasTarget = step => {
+    const t = step.target || {};
+    return !!(t.testid || t.selector || t.component || t.text || (step.selectors || []).length
+      || (step.components || []).length || step.pattern);
+  };
 
-  /** Where a Clawd should stand: on its target's top edge, else along the bottom. */
-  /**
-   * The target's box. When it leaves the DOM (removed, or re-rendered by hot reload) the
-   * last box is kept for a few seconds — he's vacuuming up exactly that spot — and then
-   * the action's targets are looked up again (e.g. the component around it).
-   */
-  function rectOf(c, now) {
-    if (c.target && c.target.isConnected) {
-      c.lastRect = c.target.getBoundingClientRect();
-      c.lostAt = 0;
-      return c.lastRect;
+  /** The box a step works on: the live element, else (removed by hot reload) its last box. */
+  function stepRect(step) {
+    if (step.el && step.el.isConnected) {
+      step.rect = step.el.getBoundingClientRect();
+      step.gone = false;
+    } else if (step.el && step.rect) {
+      step.gone = true; // keep working on where it was
     }
-    if (!c.lastRect) return null;
-    if (!c.lostAt) c.lostAt = now;
-    if (now - c.lostAt < 5000) return c.lastRect;
-    c.lastRect = null;
-    c.target = c.action ? findTarget(c.action) : null;
-    return c.target ? rectOf(c, now) : null;
+    return step.rect || null;
   }
 
-  function destination(c, now) {
+  /** The exact spot he works at: a point inside the target (canvas…), else null. */
+  function stepPoint(step, r) {
+    const t = step.target || {};
+    if (!r || t.x == null || t.y == null) return null;
+    return { x: r.left + clamp(t.x, 0, 1) * r.width, y: r.top + clamp(t.y, 0, 1) * r.height };
+  }
+
+  /** Where his feet go: next to the point, or on the target's top edge, else bottom-right. */
+  function destination(c) {
     const { w, h } = vp();
+    if (c.leaving && !c.cur && !c.queue.length) {
+      const exitLeft = c.pos && c.pos.x + FOOT_X < w / 2;
+      return { x: exitLeft ? -SPRITE_W - 20 : w + 20, y: c.pos ? c.pos.y : h - BELOW - FOOT_Y };
+    }
+    const step = c.cur;
+    const r = step && stepRect(step);
     let fx;
     let fy;
-    const r = rectOf(c, now);
-    if (r) {
+    const pt = step && stepPoint(step, r);
+    if (pt) {
+      fx = pt.x - HAND.x; // hand on the spot
+      fy = pt.y + HAND.y;
+    } else if (r) {
       fx = r.left + Math.min(56, r.width / 2) + c.offset;
       fy = r.top > SPRITE_H + 24 ? r.top + 4 : Math.min(r.bottom, r.top + SPRITE_H + 12);
     } else {
@@ -378,29 +383,53 @@ ${CLAWD_CSS}`;
       fy = h - BELOW;
     }
     // Keep all of him on screen: caption above, name tag and water counter below.
-    fx = Math.max(FOOT_X + 4, Math.min(w - (SPRITE_W - FOOT_X) - 4, fx));
-    fy = Math.max(FOOT_Y + 26, Math.min(h - BELOW, fy));
+    fx = clamp(fx, FOOT_X + 4, w - (SPRITE_W - FOOT_X) - 4);
+    fy = clamp(fy, FOOT_Y + 26, h - BELOW);
     return { x: fx - FOOT_X, y: fy - FOOT_Y };
   }
 
-  function placeHighlight(c, now) {
-    const { hl } = c;
-    const r = !c.phase && (c.action || c.actMood === 'done') ? rectOf(c, now) : null;
+  const lerpRect = (a, b, k) => (a ? {
+    left: a.left + (b.left - a.left) * k, top: a.top + (b.top - a.top) * k,
+    width: a.width + (b.width - a.width) * k, height: a.height + (b.height - a.height) * k,
+  } : { ...b });
+  const place = (n, r) => {
+    n.style.transform = `translate(${Math.round(r.left)}px, ${Math.round(r.top)}px)`;
+    n.style.width = `${Math.round(r.width)}px`;
+    n.style.height = `${Math.round(r.height)}px`;
+  };
+
+  /** Glow around the target (or a ring round the spot), effects where his hand is. */
+  function placeGlow(c, working) {
+    const step = c.cur;
+    const r = working && step && step.rect;
+    const { w, h } = vp();
     if (!r) {
-      hl.classList.remove('on');
+      c.glow.classList.remove('on');
+      c.box.classList.remove('on');
       return;
     }
-    const { w, h } = vp();
-    const l = Math.max(2, r.left - 4);
-    const t = Math.max(2, r.top - 4);
-    const rr = Math.min(w - 2, r.right + 4);
-    const b = Math.min(h - 2, r.bottom + 4);
-    if (rr - l < 8 || b - t < 8) { hl.classList.remove('on'); return; }
-    hl.style.left = `${l}px`;
-    hl.style.top = `${t}px`;
-    hl.style.width = `${rr - l}px`;
-    hl.style.height = `${b - t}px`;
-    hl.classList.add('on');
+    const pt = stepPoint(step, r);
+    let g = pt ? { left: pt.x - 26, top: pt.y - 26, width: 52, height: 52 }
+      : { left: r.left - 6, top: r.top - 6, width: r.width + 12, height: r.height + 12 };
+    g = { left: clamp(g.left, 2, w - 10), top: clamp(g.top, 2, h - 10), width: Math.min(g.width, w - 4), height: Math.min(g.height, h - 4) };
+    c.glowRect = lerpRect(c.glowRect, g, 0.22);
+    place(c.glow, c.glowRect);
+    c.glow.style.borderRadius = pt ? '50%' : '12px';
+    c.glow.classList.toggle('on', !step.gone || !!step.ghostImg);
+    // Effects: a patch around his hand (or the spot), inside the target.
+    const hx = pt ? pt.x : c.pos.x + FOOT_X + HAND.x;
+    const hy = pt ? pt.y : c.pos.y + FOOT_Y - HAND.y;
+    const bw = Math.min(r.width, 220);
+    const bh = Math.min(r.height, 130);
+    const b = {
+      left: clamp(hx - bw / 2, r.left, r.right - bw),
+      top: clamp(hy - bh / 2, r.top, r.bottom - bh),
+      width: bw,
+      height: bh,
+    };
+    c.boxRect = lerpRect(c.boxRect, b, 0.22);
+    place(c.box, c.boxRect);
+    c.box.classList.add('on');
   }
 
   function setLabel(c, text) {
@@ -414,7 +443,7 @@ ${CLAWD_CSS}`;
     if (!c.label.textContent) return;
     if (!c.labelW) c.labelW = c.label.offsetWidth;
     const half = c.labelW / 2;
-    const centre = Math.max(half + 4, Math.min(vp().w - half - 4, c.pos.x + SPRITE_W / 2));
+    const centre = clamp(c.pos.x + SPRITE_W / 2, half + 4, vp().w - half - 4);
     c.label.style.left = `${Math.round(centre - c.pos.x)}px`;
   }
 
@@ -426,11 +455,15 @@ ${CLAWD_CSS}`;
     setMood(c.svg, m, extra);
   }
 
-  function currentLabel(c) {
-    return c.action ? c.action.label : MOOD_LABEL[c.actMood] || '';
-  }
-
-  function tickle(c) {
+  function click(c) {
+    // A Clawd waving for attention is dismissed by a click (until Claude has news).
+    if (c.cur && c.cur.kind === 'wave') {
+      c.dismissed = true;
+      c.queue = [];
+      c.cur = { kind: 'idle', say: 'OK, I’ll wait 👍', ms: 700, id: ++stepSeq };
+      c.leaving = true;
+      return;
+    }
     const now = performance.now();
     if (now - c.lastTickle > 3000) c.tickles = 0;
     c.lastTickle = now;
@@ -438,77 +471,15 @@ ${CLAWD_CSS}`;
     c.tickleUntil = now + 1300;
   }
 
-  /** Portal in (he rises out of it) — on arrival and at the end of a teleport. */
-  function startIn(c, now) {
-    c.phase = 'in';
-    c.phaseAt = now;
-    c.root.classList.add('emerging');
-    c.portal.classList.remove('blue');
-    c.portal.classList.add('open');
-    c.svg.style.setProperty('--portal', '#ff8a1f');
-  }
-
-  /** Portal out (he sinks into it), then vanish or reappear at his destination. */
-  function startOut(c, now, then) {
-    c.phase = 'out';
-    c.phaseAt = now;
-    c.then = then;
-    c.fired = false;
-    c.svg.style.setProperty('--portal', '#2f8cff');
-  }
-
-  /** The portal gun's muzzle after he aims it down, in viewport px. */
-  function muzzle(c) {
-    const flip = c.turn.classList.contains('flip');
-    const mx = (19.4 - VIEWBOX.x) * UNIT;
-    return { x: c.pos.x + (flip ? SPRITE_W - mx : mx), y: c.pos.y + (7 - VIEWBOX.y) * UNIT };
-  }
-
-  /** A blue blob flying from the gun to where the portal will open (under his feet). */
-  function fire(c) {
-    const from = muzzle(c);
-    const shot = el('div', 'shot', layer);
-    shot.style.transform = `translate(${from.x}px, ${from.y}px)`;
-    const to = { x: c.pos.x + FOOT_X, y: c.pos.y + FOOT_Y };
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      shot.style.transform = `translate(${to.x}px, ${to.y}px) scale(.6)`;
-    }));
-    setTimeout(() => shot.remove(), 230);
-  }
-
-  /** Advance a portal animation; returns false if the Clawd is gone. */
-  function stepPhase(c, now, dest) {
-    const t = now - c.phaseAt;
-    if (c.phase === 'in') {
-      if (t > 650) c.portal.classList.remove('open');
-      if (t > 1000) { c.phase = null; c.root.classList.remove('emerging'); }
-    } else {
-      // Aim the portal gun down, fire, blue portal opens, drop in.
-      if (t > 260 && !c.fired) { c.fired = true; fire(c); }
-      if (t > 440) c.portal.classList.add('blue', 'open');
-      if (t > 580) c.root.classList.add('sinking');
-      if (t > 1060) c.portal.classList.remove('open');
-      if (t > 1280) {
-        c.root.classList.remove('sinking');
-        if (c.then === 'remove') { removeClawd(c); return false; }
-        c.pos = { ...dest };
-        startIn(c, now);
-      }
-    }
-    return true;
-  }
-
   /** Eyes follow a nearby cursor; he gives a little start when it first comes close. */
   function watchCursor(c, now) {
     if (!mouse) { if (c.near) { c.near = false; lookAt(c.svg, null); } return; }
     const flip = c.turn.classList.contains('flip');
-    const ex = c.pos.x + (flip ? SPRITE_W - EYES.x : EYES.x);
-    const ey = c.pos.y + EYES.y;
-    const dx = mouse.x - ex;
-    const dy = mouse.y - ey;
+    const dx = mouse.x - (c.pos.x + (flip ? SPRITE_W - EYES.x : EYES.x));
+    const dy = mouse.y - (c.pos.y + EYES.y);
     const near = Math.hypot(dx, dy) < NEAR;
     if (near) {
-      if (!c.near && ['idle', 'done', 'think', 'read'].includes(c.actMood)) c.noticeUntil = now + 350;
+      if (!c.near && /^(idle|done|think|read)$/.test(c.mood)) c.noticeUntil = now + 350;
       lookAt(c.svg, flip ? -dx : dx, dy);
     } else if (c.near) {
       lookAt(c.svg, null);
@@ -523,82 +494,163 @@ ${CLAWD_CSS}`;
     return { x: c.pos.x + (flip ? SPRITE_W - hx : hx), y: c.pos.y + (1 - VIEWBOX.y) * UNIT, dir: flip ? -1 : 1 };
   }
 
-  function step(c, now, dt) {
-    // Targets that aren't rendered yet (hot reload still applying) get a few retries.
-    if (c.retryUntil > now && now > c.retryAt) {
-      c.retryAt = now + 400;
-      const t = findTarget(c.action || {});
-      if (t) { c.target = t; c.retryUntil = 0; }
+  /** The element vanished (hot reload): leave its picture in place, to be vacuumed up. */
+  function showGhost(c, step) {
+    if (step.ghostImg || !step.ghostSrc || !step.rect) return;
+    const img = el('img', 'ghost');
+    layer.insertBefore(img, layer.firstChild); // under every Clawd
+    img.src = step.ghostSrc;
+    img.style.width = `${step.rect.width}px`;
+    img.style.height = `${step.rect.height}px`;
+    img.style.transform = `translate(${step.rect.left}px, ${step.rect.top}px)`;
+    step.ghostImg = img;
+    c.ghosts.push(img);
+  }
+
+  /** Suck (or rub out) the ghost into his tool. */
+  function consumeGhost(c, step) {
+    const img = step.ghostImg;
+    if (!img || step.consumed) return;
+    step.consumed = true;
+    const hand = handPos(c);
+    const r = step.rect;
+    requestAnimationFrame(() => {
+      img.style.transform = step.kind === 'remove'
+        ? `translate(${hand.x}px, ${hand.y}px) scale(.03)`
+        : `translate(${r.left}px, ${r.top}px) scale(1)`;
+      img.style.opacity = '0';
+    });
+    setTimeout(() => { img.remove(); c.ghosts = c.ghosts.filter(x => x !== img); }, 1300);
+  }
+
+  /** Start the next step in the queue. */
+  function begin(c, now) {
+    const step = c.queue.shift();
+    c.cur = step;
+    step.startedAt = now;
+    step.arrivedAt = 0;
+    if (!step.el && hasTarget(step)) step.el = resolve(step);
+    step.retryUntil = !step.el && hasTarget(step) ? now + 4000 : 0;
+    if (step.say != null) setLabel(c, step.say);
+    c.fx.replaceChildren();
+    c.glowRect = c.glowRect && step.el ? c.glowRect : null;
+    c.glow.classList.remove('ok');
+  }
+
+  function arrive(c, now) {
+    const step = c.cur;
+    step.arrivedAt = now;
+    // Backed up? Get through it quicker rather than skipping anything.
+    const hurry = c.queue.length >= 3 ? 0.5 : 1;
+    step.endAt = now + Math.max(900, step.ms * hurry);
+    if (step.kind === 'done') {
+      if (step.rect) c.glow.classList.add('ok');
+    } else if (!/^(idle|wave|error|think)$/.test(step.kind)) {
+      effects(c, { kind: step.kind, color: step.color, measure: step.measure });
     }
-    const dest = destination(c, now);
-    if (!c.pos) { c.pos = { ...dest }; startIn(c, now); }
-    if (c.leaving && !c.phase) startOut(c, now, 'remove');
-    if (c.phase) {
-      if (!stepPhase(c, now, dest)) return;
-      // Arrives holding the portal gun; aims it to leave until he's dropping through.
-      show(c, 'portal', now);
-      c.root.style.transform = `translate(${Math.round(c.pos.x)}px, ${Math.round(c.pos.y)}px)`;
-      placeLabel(c);
-      placeHighlight(c, now);
-      return;
+    if (step.ghostImg) consumeGhost(c, step);
+  }
+
+  function finishStep(c) {
+    const step = c.cur;
+    c.cur = null;
+    c.fx.replaceChildren();
+    if (step && step.ghostImg && !step.consumed) consumeGhost(c, step);
+    if (step) c.idleMood = step.kind === 'done' || step.kind === 'error' ? step.kind : 'idle';
+    if (!c.queue.length && c.endAfterQueue) {
+      c.leaving = true;
+      setLabel(c, c.idleMood === 'error' ? '' : 'Bye! 👋');
+    } else if (!c.queue.length) {
+      setLabel(c, '');
+    }
+  }
+
+  function update(c, now, dt) {
+    const s = c.cur;
+    if (!s && c.queue.length) begin(c, now);
+    const cur = c.cur;
+    // Targets that aren't rendered yet (hot reload still applying) get a few retries.
+    if (cur && cur.retryUntil > now && now > (cur.retryAt || 0)) {
+      cur.retryAt = now + 300;
+      const t = resolve(cur);
+      if (t) { cur.el = t; cur.retryUntil = 0; }
+    }
+    if (cur && cur.el && !cur.el.isConnected && cur.rect) showGhost(c, cur);
+    const dest = destination(c);
+    if (!c.pos) {
+      // Walk on from the nearer side of the screen.
+      const fromLeft = dest.x + FOOT_X < vp().w / 2;
+      c.pos = { x: fromLeft ? -SPRITE_W - 10 : vp().w + 10, y: dest.y };
     }
     const dx = dest.x - c.pos.x;
     const dy = dest.y - c.pos.y;
     const dist = Math.hypot(dx, dy);
-    // Far away? Portal there instead of a long walk.
-    if (dist > 520) { startOut(c, now, 'teleport'); return; }
-    const walking = dist > (c.mood === 'walk' ? 2 : 36);
+    const moving = dist > (c.mood === 'walk' ? 2 : 30);
     watchCursor(c, now);
-    if (c.tickleUntil && now > c.tickleUntil) { c.tickleUntil = 0; setLabel(c, c.waterUntil ? MOOD_LABEL.water : currentLabel(c)); }
-    if (walking) {
-      const s = Math.min(dist, SPEED * dt);
-      c.pos.x += dx / dist * s;
-      c.pos.y += dy / dist * s;
+    if (c.tickleUntil && now > c.tickleUntil) {
+      c.tickleUntil = 0;
+      setLabel(c, c.cur ? c.cur.say || '' : '');
+    }
+    if (moving) {
+      const sp = dist > 400 ? RUN : SPEED;
+      const k = Math.min(dist, sp * dt);
+      c.pos.x += dx / dist * k;
+      c.pos.y += dy / dist * k;
       if (Math.abs(dx) > 2) c.turn.classList.toggle('flip', dx < 0);
       show(c, 'walk', now);
     } else {
-      // Small drifts (scrolling a little) are followed without breaking into a walk.
       if (dist > 0.5) { c.pos.x += dx * 0.3; c.pos.y += dy * 0.3; }
-      const busy = !['done', 'error', 'idle', 'wave'].includes(c.actMood);
-      if (busy && now > c.nextWater && !c.waterUntil && !c.throwUntil) {
-        c.waterUntil = now + 3000; // matches the one-shot drinking animation
-        c.litres += 0.5;
-        c.waterEl.textContent = `💧 ${c.litres.toFixed(1)} L`;
-        c.waterEl.classList.add('on');
+      if (c.leaving && !c.cur && !c.queue.length) { removeClawd(c); return; }
+      if (cur && !cur.arrivedAt) {
+        // Face the spot he's working on.
+        if (stepPoint(cur, cur.rect)) c.turn.classList.remove('flip');
+        arrive(c, now);
       }
-      if (c.waterUntil && now > c.waterUntil) {
-        // Empty: wind up and chuck the bottle at the cursor.
-        c.waterUntil = 0;
-        c.throwUntil = now + 450;
-        c.nextWater = now + 22000 + Math.random() * 20000;
-      }
-      if (c.throwUntil && now > c.throwUntil) {
-        c.throwUntil = 0;
-        const hand = handPos(c);
-        const aim = mouse || { x: hand.x + hand.dir * 260, y: hand.y - 220 };
-        tossBottle(document, layer, hand.x, hand.y, aim.x, aim.y);
-        c.waterEl.classList.remove('on');
-        setLabel(c, currentLabel(c));
-      }
-      if (c.waterUntil) {
-        if (!c.tickleUntil) setLabel(c, MOOD_LABEL.water);
-        show(c, 'water', now);
-      } else if (c.throwUntil) {
-        show(c, 'throw', now);
+      if (cur && now > cur.endAt) finishStep(c);
+      else if (cur) {
+        c.lastWork = now;
+        show(c, cur.kind === 'paint' && !cur.rect ? 'canvas' : cur.kind, now);
       } else {
-        show(c, c.actMood, now);
+        idle(c, now);
       }
     }
+    placeGlow(c, !!(c.cur && c.cur.arrivedAt && !moving));
     c.root.style.transform = `translate(${Math.round(c.pos.x)}px, ${Math.round(c.pos.y)}px)`;
     placeLabel(c);
-    placeHighlight(c, now);
+  }
+
+  /** Between steps: water breaks while the session is busy (and bottle tossing). */
+  function idle(c, now) {
+    const busy = now - c.lastWork < 60000 && !/^(done|error)$/.test(c.idleMood) && !c.leaving;
+    if (!c.nextWater) c.nextWater = now + 9000 + Math.random() * 9000;
+    if (busy && now > c.nextWater && !c.waterUntil && !c.throwUntil) {
+      c.waterUntil = now + 3000; // matches the one-shot drinking animation
+      c.litres += 0.5;
+      c.waterEl.textContent = `💧 ${c.litres.toFixed(1)} L`;
+      c.waterEl.classList.add('on');
+      setLabel(c, MOOD_LABEL.water);
+    }
+    if (c.waterUntil && now > c.waterUntil) {
+      c.waterUntil = 0;
+      c.throwUntil = now + 450;
+      c.nextWater = now + 22000 + Math.random() * 20000;
+    }
+    if (c.throwUntil && now > c.throwUntil) {
+      c.throwUntil = 0;
+      const hand = handPos(c);
+      const aim = mouse || { x: hand.x + hand.dir * 260, y: hand.y - 220 };
+      tossBottle(document, layer, hand.x, hand.y, aim.x, aim.y);
+      c.waterEl.classList.remove('on');
+      setLabel(c, '');
+    }
+    show(c, c.waterUntil ? 'water' : c.throwUntil ? 'throw' : c.idleMood, now);
   }
 
   function tick(now) {
     raf = requestAnimationFrame(tick);
     const dt = Math.min(0.05, (now - lastT) / 1000);
     lastT = now;
-    for (const c of [...clawds.values()]) step(c, now, dt);
+    for (const c of [...clawds.values()]) update(c, now, dt);
   }
 
   /** Effects drawn over the element being worked on, by kind of change. */
@@ -702,55 +754,72 @@ ${CLAWD_CSS}`;
     }
   }
 
-  function act(c, a) {
-    clearTimeout(c.leaveTimer);
+  /** A choreography from Claude: queue it; report what it's about to remove. */
+  function play(c, msg) {
+    // Claude's own steps replace any guesses still waiting.
+    c.queue = c.queue.filter(st => !st.guess);
+    if (c.cur && c.cur.guess) c.cur.endAt = 0;
     c.leaving = false;
-    c.action = a;
-    c.live = !!a.live;
-    if (a.tag != null) c.tagEl.textContent = a.tag;
-    // The attention sign can say which tmux window wants you.
-    const sign = c.svg.querySelector('.cw-p-ask text');
-    if (sign) sign.textContent = a.sign || '!?';
-    const t = findTarget(a);
-    c.retryUntil = !t && ((a.components && a.components.length) || (a.selectors && a.selectors.length)) ? performance.now() + 4000 : 0;
-    if (t) {
-      c.target = t;
-      c.lastRect = null;
-      const r = t.getBoundingClientRect();
-      // A Clawdify job may bring its target into view; Live Clawd never moves your page.
-      if (!c.live && (r.bottom < 0 || r.top > vp().h)) t.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    } else if (NO_TARGET.has(a.kind) || a.kind === 'wave') {
-      c.target = null;
-    } // else: keep standing at the previous target
-    // Paint jobs with no element to stand on get an easel instead of a palette.
-    c.actMood = a.kind === 'paint' && !c.target ? 'canvas' : a.kind;
-    if (!c.nextWater) c.nextWater = performance.now() + 9000 + Math.random() * 9000;
-    setLabel(c, a.label || '');
-    effects(c, a);
+    c.endAfterQueue = null;
+    c.dismissed = false;
+    const ghosts = [];
+    for (const st of msg.steps || []) {
+      const s = { ...st, id: ++stepSeq };
+      if (/^(remove|erase)$/.test(s.kind)) {
+        // Find it now, before the edit lands, so it can be snapshotted.
+        s.el = resolve(s);
+        if (s.el) {
+          const r = s.el.getBoundingClientRect();
+          s.rect = r;
+          const { w, h } = vp();
+          if (r.right > 0 && r.bottom > 0 && r.left < w && r.top < h) {
+            ghosts.push({ step: s.id, rect: { left: Math.max(0, r.left), top: Math.max(0, r.top), width: Math.min(r.right, w) - Math.max(0, r.left), height: Math.min(r.bottom, h) - Math.max(0, r.top) } });
+          }
+        }
+      }
+      c.queue.push(s);
+    }
+    return { ghosts, dpr: window.devicePixelRatio || 1 };
+  }
+
+  function attachGhosts(c, msg) {
+    for (const g of msg.ghosts || []) {
+      const s = [c.cur, ...c.queue].find(x => x && x.id === g.step);
+      if (s && g.src) { s.ghostSrc = g.src; s.rect = g.rect; }
+    }
+  }
+
+  /** A guessed action (job events, hook fallbacks): only when Claude isn't choreographing. */
+  function guess(c, a) {
+    const busyWithClaude = (c.cur && !c.cur.guess && c.cur.kind !== 'idle') || c.queue.some(s => !s.guess);
+    const s = {
+      kind: a.kind, say: a.label || '', ms: GUESS_MS, color: a.color, measure: a.measure,
+      selectors: a.selectors, components: a.components, pattern: a.pattern, sign: a.sign, guess: true, id: ++stepSeq,
+    };
+    if (a.kind === 'wave') {
+      // Needing the user beats everything: straight to the front.
+      const sign = c.svg.querySelector('.cw-p-ask text');
+      if (sign) sign.textContent = a.sign || '!?';
+      s.ms = 600000;
+      c.queue = [s, ...c.queue.filter(x => x.kind !== 'wave')];
+      if (c.cur) c.cur.endAt = 0;
+      c.leaving = false;
+      c.endAfterQueue = null;
+      return;
+    }
+    if (busyWithClaude) return;
+    c.leaving = false;
+    c.endAfterQueue = null;
+    // Keep the guess currently showing for its minimum time; replace any waiting.
+    c.queue = c.queue.filter(x => !x.guess);
+    c.queue.push(s);
   }
 
   function finish(c, ok) {
-    c.action = null;
-    c.actMood = ok ? 'done' : 'error';
-    c.waterUntil = 0;
-    c.waterEl.classList.remove('on');
-    setLabel(c, MOOD_LABEL[c.actMood]);
-    c.fx.replaceChildren();
-    c.hl.classList.remove('wobble', 'bounce');
-    if (ok && c.target) {
-      c.hl.classList.add('ok');
-      el('div', 'ok-tick', c.fx, '✓');
-    }
-    clearTimeout(c.leaveTimer);
-    c.leaveTimer = setTimeout(() => leave(c), ok ? 3200 : 4200);
-  }
-
-  function leave(c) {
-    c.action = null;
-    c.target = null;
-    c.lastRect = null;
-    setLabel(c, c.actMood === 'error' ? '' : 'Bye! 👋');
-    c.leaving = true;
+    c.queue = c.queue.filter(x => x.kind !== 'wave');
+    if (c.cur && c.cur.kind === 'wave') c.cur.endAt = 0;
+    c.queue.push({ kind: ok ? 'done' : 'error', say: MOOD_LABEL[ok ? 'done' : 'error'], ms: ok ? 3000 : 4000, id: ++stepSeq, target: {} });
+    c.endAfterQueue = true;
   }
 
   window.__cmClawd = msg => {
@@ -758,15 +827,22 @@ ${CLAWD_CSS}`;
     const id = String(msg.id || 'job');
     if (msg.op === 'leave') {
       const c = clawds.get(id);
-      if (c) leave(c);
-      return;
+      if (c) c.endAfterQueue = true;
+      if (c && !c.cur && !c.queue.length) c.leaving = true;
+      return null;
+    }
+    if (msg.op === 'ghosts') {
+      const c = clawds.get(id);
+      if (c) attachGhosts(c, msg);
+      return null;
     }
     ensureLayer();
-    const c = getClawd(id, msg.tag);
-    if (msg.tag != null) c.tagEl.textContent = msg.tag;
-    if (msg.op === 'act') act(c, msg);
+    const c = getClawd(id, msg);
+    if (msg.op === 'play') return play(c, msg);
+    if (msg.op === 'act') guess(c, msg);
     else if (msg.op === 'done') finish(c, true);
     else if (msg.op === 'error') finish(c, false);
+    return null;
   };
 }
 

@@ -16,9 +16,10 @@ mkdir -p "$spool" 2>/dev/null || exit 0
 # Which tmux window this Claude session lives in, so Clawd can say where to look.
 win=""
 [ -n "$TMUX_PANE" ] && win=$(tmux display-message -p -t "$TMUX_PANE" '#I #W' 2>/dev/null | tr -cd '[:alnum:] ._-' | cut -c1-40)
+pane=$(printf %s "$TMUX_PANE" | tr -cd '%0-9')
 f="$spool/$(date +%s%N)-$$.json"
 {
-  printf '{"tmux":"%s","hook":' "$win"
+  printf '{"tmux":"%s","pane":"%s","hook":' "$win" "$pane"
   # Cap the size (a big Write carries the whole file); the bridge drops what won't parse.
   head -c 262144
   printf '}'

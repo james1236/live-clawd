@@ -72,14 +72,6 @@ const RIGHT = [
     R(15.4, -4, 1.4, 1, '#3a7bd5'), R(15, 0, 2.2, 1, '#ffffff'),
   ]),
   G('cw-prop cw-p-ask', [R(15.6, 1, 0.8, 4.5, WOOD), R(13.8, -4.4, 6, 5, '#fff3c4'), R(13.8, -4.4, 6, 0.6, '#e2b04a'), T(14.9, -0.5, 3.4, '#c0392b', '!?', 'cw-sign-text')]),
-  // Aperture Science Handheld Portal Device: white shell, black claws, glowing core.
-  G('cw-prop cw-p-portalgun', [
-    R(13.4, 3.4, 1.4, 2, '#d8d8d8'),
-    R(14.2, 2, 4.2, 2.6, '#f4f4f4'), R(14.2, 4.2, 4.2, 0.4, '#bdbdbd'),
-    R(15.4, 2, 0.6, 2.6, '#2b2b2b'),
-    R(18.4, 1.5, 1.2, 0.7, '#2b2b2b'), R(18.4, 4.1, 1.2, 0.7, '#2b2b2b'), R(18.9, 2.6, 1, 0.6, '#2b2b2b'),
-    C(18.7, 3.2, 0.8, 'var(--portal, #2f8cff)', 'cw-core'),
-  ]),
   G('cw-prop cw-p-key', [C(16, 0.5, 1.2, '#e2b04a'), C(16, 0.5, 0.45, '#8a6a1f'), R(15.6, 1.5, 0.8, 3.5, '#e2b04a'), R(16.4, 3.5, 0.8, 0.5, '#e2b04a')]),
 ];
 
@@ -294,7 +286,6 @@ const SHOW = {
   water: ['cw-p-bottle', 'cw-glugs'],
   throw: ['cw-p-bottle'],
   wave: ['cw-p-ask'],
-  portal: ['cw-p-portalgun'],
   canvas: ['cw-f-easel', 'cw-p-brush', 'cw-h-beret'],
 };
 const showCss = Object.entries(SHOW)
@@ -466,13 +457,6 @@ ${showCss}
 .m-throw .cw-ar { animation: cw-throw .45s cubic-bezier(.5, 0, .9, .4) forwards; }
 .m-throw .cw-water-air { transform-origin: 16px -3px; transform: scaleY(3.6); }
 .m-throw .cw-look { animation: none; transform: translate(1px, -1px); }
-
-/* portal gun: aims at the floor in front of him; the core pulses */
-@keyframes cw-aim { 0% { transform: rotate(0); } 100% { transform: rotate(38deg); } }
-@keyframes cw-core { 0%, 100% { opacity: .75; } 50% { opacity: 1; } }
-.m-portal .cw-ar { animation: cw-aim .25s ease-out forwards; }
-.m-portal .cw-look { animation: none; transform: translate(1px, 1px); }
-.cw-core { animation: cw-core .4s ease-in-out infinite; }
 
 /* tickled: giggles and wiggles */
 @keyframes cw-giggle { 0%, 100% { transform: rotate(-7deg); } 50% { transform: rotate(7deg) translateY(-.5px); } }

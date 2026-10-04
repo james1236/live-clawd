@@ -190,6 +190,14 @@ function handleMessage(msg) {
     startLive();
     return;
   }
+  if (msg.type === 'live-ack' && msg.ackId) {
+    // The browser has the choreography: release the waiting `clawd` tool call.
+    try {
+      fs.mkdirSync(path.join(LIVE_DIR, 'acks'), { recursive: true });
+      fs.writeFileSync(path.join(LIVE_DIR, 'acks', String(msg.ackId).replace(/[^\w.-]/g, '')), '');
+    } catch { /* it just waits out its timeout */ }
+    return;
+  }
   if (msg.type === 'generate') {
     try {
       runGenerate(msg);
@@ -355,6 +363,8 @@ function startLive() {
   // Anything spooled before we started listening is stale.
   try { for (const f of fs.readdirSync(SPOOL_DIR)) fs.unlinkSync(path.join(SPOOL_DIR, f)); } catch { /* ignore */ }
   liveTimers = [setInterval(beat, 5000), setInterval(drainSpool, 250)];
+  // Pick events up as soon as they land (the poll is the fallback).
+  try { fs.watch(SPOOL_DIR, () => drainSpool()); } catch { /* polling only */ }
   sendMessage({ type: 'live-ready' });
 }
 
@@ -513,12 +523,15 @@ function scanChanges(root) {
 }
 
 function relayLive(ev) {
-  // live-hook.sh wraps the hook JSON with the tmux window it ran in.
+  // live-hook.sh wraps the hook JSON with the tmux window/pane it ran in.
   let tmux = '';
-  if (ev && ev.hook && typeof ev.hook === 'object') {
+  let pane = '';
+  if (ev && (ev.hook || ev.clawd)) {
     tmux = String(ev.tmux || '');
-    ev = ev.hook;
+    pane = String(ev.pane || '');
   }
+  const choreo = ev && ev.clawd ? ev : null;
+  if (ev && ev.hook && typeof ev.hook === 'object') ev = ev.hook;
   if (!ev || !ev.cwd) return;
   const root = projectRoot(ev.cwd);
   const cfg = loadLiveConfig();
@@ -527,12 +540,20 @@ function relayLive(ev) {
   if (!ports.length) return;
   const out = {
     type: 'live',
-    session: String(ev.session_id || 'default'),
+    // One Clawd per Claude session: its tmux pane when there is one (the `clawd` tool
+    // and the hooks both know it), else the session id / project.
+    session: pane || String(ev.session_id || root),
     project: path.basename(root),
-    event: ev.hook_event_name,
+    event: choreo ? 'Clawd' : ev.hook_event_name,
     ports,
     tmux,
   };
+  if (choreo) {
+    out.steps = choreo.steps;
+    out.ackId = choreo.ackId;
+    sendMessage(out);
+    return;
+  }
   if (ev.hook_event_name === 'PostToolUse') {
     // Only tools that can touch files; report what really changed on disk.
     if (!/^(Bash|Edit|Write|MultiEdit|NotebookEdit)$/.test(ev.tool_name || '')) return;

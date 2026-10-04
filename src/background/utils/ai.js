@@ -824,13 +824,19 @@ function clawd(job, msg) {
   });
 }
 
+/** Send `msg` to the tab's overlay; resolves with what the overlay returned (or null). */
 export async function clawdNow(tabId, msg) {
   try {
     await browser.tabs.executeScript(tabId, { file: '/clawd-overlay.js' });
-    await browser.tabs.executeScript(tabId, { code: `window.__cmClawd && window.__cmClawd(${JSON.stringify(msg)}); 0` });
-    if (/^(act|done|error)$/.test(msg.op)) setPresence(tabId, msg.id || 'job', true);
+    const [res] = await browser.tabs.executeScript(tabId, {
+      code: `JSON.stringify(window.__cmClawd ? window.__cmClawd(${JSON.stringify(msg)}) || null : null)`,
+    });
+    if (/^(act|play|done|error)$/.test(msg.op)) setPresence(tabId, msg.id || 'job', true);
     else if (msg.op === 'hide' && msg.final) setPresence(tabId, null, false);
-  } catch { /* restricted page, closed tab, ... */ }
+    return res ? JSON.parse(res) : null;
+  } catch {
+    return null; // restricted page, closed tab, ...
+  }
 }
 
 // Which Clawds are on which tab's page. The sidebar hides its own Clawd (he "portals

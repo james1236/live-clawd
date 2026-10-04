@@ -106,3 +106,30 @@ export async function runTabTool(tabId, windowId, tool, args) {
     throw new Error(`Unknown tool ${tool}`);
   }
 }
+
+/**
+ * Snapshot the visible tab and cut out `rects` (CSS px) — images of elements about to be
+ * removed, so Clawd can still be seen vacuuming them up after hot reload deletes them.
+ * @return {Promise<string[]>} data: URLs ('' where it failed)
+ */
+export async function cropVisible(windowId, rects, dpr = 1) {
+  const shot = await browser.tabs.captureVisibleTab(windowId, { format: 'png' });
+  const bmp = await createImageBitmap(await (await fetch(shot)).blob());
+  return Promise.all(rects.map(async r => {
+    try {
+      const w = Math.max(1, Math.round(r.width * dpr));
+      const h = Math.max(1, Math.round(r.height * dpr));
+      const canvas = new OffscreenCanvas(w, h);
+      canvas.getContext('2d').drawImage(bmp, Math.round(r.left * dpr), Math.round(r.top * dpr), w, h, 0, 0, w, h);
+      const blob = await canvas.convertToBlob({ type: 'image/png' });
+      return await new Promise(res => {
+        const fr = new FileReader();
+        fr.onload = () => res(fr.result);
+        fr.onerror = () => res('');
+        fr.readAsDataURL(blob);
+      });
+    } catch {
+      return '';
+    }
+  }));
+}
