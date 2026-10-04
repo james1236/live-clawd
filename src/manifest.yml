@@ -72,6 +72,6 @@ minimum_chrome_version: '86.0'
 
 browser_specific_settings:
   gecko:
-    id: 'claudemonkey@local'
+    id: 'claudemonkey@james.local'
     strict_min_version: '68.0'
     # to support popular forks for older OS

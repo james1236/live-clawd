@@ -9,7 +9,7 @@
 set -euo pipefail
 
 HOST_NAME="claudemonkey.bridge"
-EXTENSION_ID="claudemonkey@local"
+EXTENSION_ID="claudemonkey@james.local"
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOST_JS="$DIR/host.js"
