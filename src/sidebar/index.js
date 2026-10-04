@@ -1,123 +1,270 @@
 /**
  * ClaudeMonkey sidebar: the live "Claude is working" view.
  *
- * Renders the current job as a readable transcript (your request, tool-use
- * chips, Claude's narration), then the resulting userscript with an Apply
- * button and a follow-up box to keep refining in the same conversation.
+ * Follows the active tab of its window and shows only that site's conversation:
+ * your requests, tool-use chips and Claude's narration, then the resulting
+ * userscript with an Apply button, and a composer to keep refining. Switching to a
+ * site with no conversation shows an empty state instead of another site's chat.
  *
- * It re-pulls full state via `AIGetState` whenever an `AIEvent` arrives, so
- * reopening the sidebar mid-run simply replays everything accumulated so far.
+ * It re-pulls state via `AIGetState` whenever an `AIEvent` arrives or the active
+ * tab changes, so reopening the sidebar mid-run replays everything so far.
  */
 import '@/common/browser';
 import { sendCmdDirectly } from '@/common';
+import { clawdSvg, esc, injectTheme, siteOf } from '@/common/cm-theme';
 
-const root = document.body;
-root.style.cssText = 'margin:0;font:13px/1.5 system-ui,sans-serif;color:#202124;background:#f6f7f9;height:100vh;display:flex;flex-direction:column;user-select:text;-webkit-user-select:text';
-// Make transcript/result text selectable so it can be copied, but keep the buttons
-// behaving like buttons (no accidental text selection on click).
-const selStyle = document.createElement('style');
-selStyle.textContent = 'button{user-select:none;-webkit-user-select:none}';
-document.head.appendChild(selStyle);
-root.innerHTML = `
-  <div style="padding:10px 12px;border-bottom:1px solid #e0e0e0;background:#fff;display:flex;align-items:center;gap:8px">
-    <div style="font-weight:600">ClaudeMonkey</div>
-    <div id="cm-status" style="color:#5f6368;font-size:12px;margin-left:auto"></div>
+injectTheme(`
+html, body { height: 100%; }
+body { display: flex; flex-direction: column; user-select: text; }
+.head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.head .who { min-width: 0; flex: 1; }
+.head .site { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); min-height: 18px; }
+.status.run { color: var(--accent); }
+.status.ok { color: var(--ok); }
+.status.bad { color: var(--err); }
+.banner { display: none; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12px; background: var(--accent-soft); color: var(--text); }
+.log { flex: 1; overflow: auto; padding: 14px 12px 6px; }
+.turn { margin-bottom: 18px; }
+.user { margin: 0 0 10px auto; width: fit-content; max-width: 88%; padding: 8px 12px; border-radius: 14px 14px 4px 14px; background: var(--surface-2); white-space: pre-wrap; word-break: break-word; }
+.say { margin: 0 0 8px; white-space: pre-wrap; word-break: break-word; font-family: ui-serif, Georgia, "Times New Roman", serif; font-size: 14px; line-height: 1.55; }
+.note { margin: 0 0 6px; font-size: 12px; color: var(--faint); white-space: pre-wrap; word-break: break-word; }
+.tools { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 8px; }
+.tools .cm-chip { font-family: ui-monospace, Consolas, monospace; font-size: 11px; max-width: 100%; }
+.fail { margin: 6px 0 8px; padding: 8px 10px; border-radius: 8px; background: var(--err-soft); color: var(--err); white-space: pre-wrap; word-break: break-word; font-size: 12px; }
+.meta { font-size: 11px; color: var(--faint); }
+.empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 10px; padding: 24px; color: var(--muted); }
+.empty .cm-clawd { opacity: .9; }
+.empty b { color: var(--text); font-weight: 600; }
+.script { border-top: 1px solid var(--border); background: var(--surface); }
+.script summary { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; font-size: 12px; font-weight: 600; list-style: none; user-select: none; }
+.script summary::-webkit-details-marker { display: none; }
+.script summary::before { content: "›"; display: inline-block; transition: transform .15s; color: var(--muted); font-size: 14px; }
+.script[open] summary::before { transform: rotate(90deg); }
+.script summary .cm-btn { margin-left: auto; padding: 4px 12px; font-size: 12px; }
+.script pre { margin: 0 12px 12px; max-height: 300px; overflow: auto; padding: 10px; border-radius: 8px; background: var(--code-bg); color: var(--code-fg); font: 12px/1.45 ui-monospace, Consolas, monospace; white-space: pre; tab-size: 2; -moz-tab-size: 2; }
+.composer { padding: 10px 12px 12px; border-top: 1px solid var(--border); background: var(--bg); }
+.box { position: relative; }
+.box .cm-input { padding-right: 46px; max-height: 200px; overflow: auto; }
+.send { position: absolute; right: 8px; bottom: 8px; width: 30px; height: 30px; padding: 0; border-radius: 8px; display: grid; place-items: center; }
+.under { display: flex; align-items: center; margin-top: 6px; }
+.under .cm-btn-ghost { margin-left: auto; }
+`);
+
+document.body.innerHTML = `
+  <div class="head">
+    ${clawdSvg(24)}
+    <div class="who">
+      <div class="site" id="site">ClaudeMonkey</div>
+      <div class="status" id="status"></div>
+    </div>
   </div>
-  <div id="cm-log" style="flex:1;overflow:auto;padding:12px"></div>
-  <div id="cm-result" style="border-top:1px solid #e0e0e0;background:#fff"></div>
-  <div style="border-top:1px solid #e0e0e0;background:#fff;padding:8px 10px">
-    <textarea id="cm-followup" rows="2" placeholder="Refine further… (Ctrl/Cmd+Enter)"
-      style="width:100%;box-sizing:border-box;resize:vertical;padding:6px;border:1px solid #dadce0;border-radius:6px;font:inherit"></textarea>
-    <button id="cm-send" style="margin-top:6px;width:100%;padding:7px;border:0;border-radius:6px;background:#1a73e8;color:#fff;font:inherit;font-weight:600;cursor:pointer">Send</button>
+  <div class="banner" id="banner"></div>
+  <div class="log" id="log"></div>
+  <div id="result"></div>
+  <div class="composer">
+    <div class="box">
+      <textarea id="input" class="cm-input" rows="1"></textarea>
+      <button id="send" class="cm-btn send" title="Send (Ctrl+Enter)" aria-label="Send">
+        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+    <div class="under">
+      <span class="cm-kbd">Ctrl+Enter to send</span>
+      <button id="new" class="cm-btn-ghost" title="Forget this site's conversation; the next request starts a fresh Claude session">New chat</button>
+    </div>
   </div>`;
 
 const $ = id => document.getElementById(id);
-const logEl = $('cm-log');
-const statusEl = $('cm-status');
-const resultEl = $('cm-result');
-const esc = s => String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const logEl = $('log');
+const inputEl = $('input');
+let windowId;
+let domain = null;
+let tabUrl = '';
+let state = null;
+let codeOpen = false;
 
-function render(job) {
-  if (!job) {
-    statusEl.textContent = '';
-    logEl.innerHTML = `<div style="color:#80868b">No active request. Open the toolbar popup and describe a change.</div>`;
-    resultEl.innerHTML = '';
-    return;
-  }
-  const running = job.status === 'running';
-  statusEl.innerHTML = running
-    ? `<span style="color:#1a73e8">● working on ${esc(job.domain)}…</span>`
-    : job.status === 'error'
-      ? `<span style="color:#d32f2f">● error</span>`
-      : `<span style="color:#188038">● done${job.cost ? ` · $${job.cost.toFixed(3)}` : ''}</span>`;
-
-  logEl.innerHTML = (job.events || []).map(ev => {
-    if (ev.type === 'user') {
-      return `<div style="background:#e8f0fe;border-radius:8px;padding:8px 10px;margin:0 0 10px auto;max-width:90%;width:fit-content">${esc(ev.text)}</div>`;
-    }
+/** Group consecutive tool events so a run of Read/Grep calls renders as one chip row. */
+function renderEvents(events) {
+  let html = '';
+  let tools = [];
+  const flush = () => {
+    if (tools.length) html += `<div class="tools">${tools.join('')}</div>`;
+    tools = [];
+  };
+  for (const ev of events || []) {
     if (ev.type === 'tool') {
-      return `<div style="display:inline-block;background:#fff;border:1px solid #e0e0e0;border-radius:12px;padding:3px 10px;margin:0 0 8px;color:#5f6368;font-size:12px">⚙ ${esc(ev.summary || ev.name)}</div><div></div>`;
+      tools.push(`<span class="cm-chip" title="${esc(ev.summary || ev.name)}">${esc(ev.summary || ev.name)}</span>`);
+      continue;
     }
-    if (ev.type === 'narration') {
-      return `<div style="background:#fff;border:1px solid #ececec;border-radius:8px;padding:8px 10px;margin:0 0 10px;max-width:95%;white-space:pre-wrap;word-break:break-word">${esc(ev.text)}</div>`;
-    }
-    return '';
-  }).join('');
-  if (job.error) {
-    logEl.innerHTML += `<div style="background:#fce8e6;color:#c5221f;border-radius:8px;padding:8px 10px;margin-top:8px;white-space:pre-wrap">${esc(job.error)}</div>`;
+    flush();
+    if (ev.type === 'user') html += `<div class="user">${esc(ev.text)}</div>`;
+    else if (ev.type === 'narration') html += `<div class="say">${esc(ev.text)}</div>`;
+    else if (ev.type === 'note') html += `<div class="note">${esc(ev.text)}</div>`;
   }
-  logEl.scrollTop = logEl.scrollHeight;
+  flush();
+  return html;
+}
 
-  if (job.script && job.status !== 'running') {
-    resultEl.innerHTML = `
-      <div style="padding:8px 10px 0;display:flex;align-items:center;gap:8px">
-        <div style="font-weight:600;font-size:12px">Resulting userscript</div>
-        <button id="cm-apply" style="margin-left:auto;padding:6px 12px;border:0;border-radius:6px;background:#188038;color:#fff;font:inherit;font-weight:600;cursor:pointer">Apply &amp; reload</button>
-      </div>
-      <pre id="cm-code" style="margin:8px 10px 10px;max-height:340px;overflow:auto;background:#1e1e1e;color:#d4d4d4;padding:10px;border-radius:6px;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;tab-size:2;-moz-tab-size:2">${esc(job.script)}</pre>`;
-    $('cm-apply').addEventListener('click', async () => {
-      const btn = $('cm-apply');
-      btn.disabled = true; btn.textContent = 'Applying…';
+function renderTurn(job) {
+  let html = `<div class="turn">${renderEvents(job.events)}`;
+  if (job.error) html += `<div class="fail">${esc(job.error)}</div>`;
+  if (job.status !== 'running') {
+    html += `<div class="meta">${job.status === 'error' ? 'Failed' : 'Done'}${job.cost ? ` · $${job.cost.toFixed(3)}` : ''}</div>`;
+  }
+  return `${html}</div>`;
+}
+
+function setStatus(cls, html) {
+  $('status').className = `status ${cls}`;
+  $('status').innerHTML = html;
+}
+
+function render() {
+  $('site').textContent = domain || 'ClaudeMonkey';
+  $('site').title = tabUrl;
+  const thread = (state && state.thread) || [];
+  const last = thread[thread.length - 1];
+  const running = state && state.running;
+  const busyHere = running && running.domain === domain;
+
+  // Status line for this site.
+  if (!domain) setStatus('', 'No site in this tab');
+  else if (busyHere) setStatus('run', '<span class="cm-dot live"></span>Claude is working…');
+  else if (last && last.status === 'error') setStatus('bad', '<span class="cm-dot"></span>Last request failed');
+  else if (state && state.script) setStatus(state.script.enabled ? 'ok' : '', `<span class="cm-dot"></span>Script ${state.script.enabled ? 'active' : 'disabled'}`);
+  else setStatus('', 'No script yet');
+
+  // Work happening on another site.
+  const banner = $('banner');
+  if (running && !busyHere) {
+    banner.style.display = 'flex';
+    banner.innerHTML = `<span class="cm-dot live" style="color:var(--accent)"></span>Claude is working on <b>${esc(running.domain)}</b>`;
+  } else {
+    banner.style.display = 'none';
+  }
+
+  // Conversation.
+  const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+  if (!domain) {
+    logEl.innerHTML = `<div class="empty">${clawdSvg(48)}<div>Open a web page to change it with Claude.</div></div>`;
+  } else if (!thread.length) {
+    logEl.innerHTML = `<div class="empty">${clawdSvg(48)}
+      <div><b>${esc(domain)}</b></div>
+      <div>${state && state.script
+        ? 'This site already has a ClaudeMonkey script. Describe a change and Claude will edit it.'
+        : 'Describe how you want this site to look or behave, and Claude will write a userscript for it.'}</div></div>`;
+  } else {
+    logEl.innerHTML = thread.map(renderTurn).join('');
+    if (atBottom || busyHere) logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // Resulting script of the latest finished turn.
+  const resultEl = $('result');
+  if (last && last.script && last.status !== 'running') {
+    resultEl.innerHTML = `<details class="script" id="code" ${codeOpen ? 'open' : ''}>
+      <summary>Userscript<button id="apply" class="cm-btn">Apply &amp; reload</button></summary>
+      <pre>${esc(last.script)}</pre></details>`;
+    $('code').addEventListener('toggle', e => { codeOpen = e.target.open; });
+    $('apply').addEventListener('click', async e => {
+      e.preventDefault();
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = 'Applying…';
       try {
-        await sendCmdDirectly('ParseScript', { code: job.script, url: job.url, reloadTab: true });
+        await sendCmdDirectly('ParseScript', { code: last.script, url: last.url, reloadTab: true });
         btn.textContent = 'Applied ✓';
-      } catch (e) {
-        btn.disabled = false; btn.textContent = 'Apply & reload';
-        statusEl.innerHTML = `<span style="color:#d32f2f">apply failed: ${esc(e)}</span>`;
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = 'Apply & reload';
+        setStatus('bad', `Apply failed: ${esc(err)}`);
       }
     });
   } else {
     resultEl.innerHTML = '';
   }
+
+  // Composer.
+  inputEl.disabled = !domain;
+  $('send').disabled = !domain || !!running;
+  $('new').disabled = !thread.length || !!busyHere;
+  inputEl.placeholder = !domain ? 'Open a web page first'
+    : thread.length ? `Refine ${domain}…` : `Describe a change to ${domain}…`;
 }
 
-async function refresh() {
-  try {
-    render(await sendCmdDirectly('AIGetState'));
-  } catch (e) {
-    statusEl.textContent = String(e);
+let pending = false;
+function refresh() {
+  if (pending) return;
+  pending = true;
+  requestAnimationFrame(async () => {
+    pending = false;
+    try {
+      state = domain ? await sendCmdDirectly('AIGetState', { domain }) : null;
+    } catch (e) {
+      state = null;
+      setStatus('bad', esc(e));
+    }
+    render();
+  });
+}
+
+async function followTab() {
+  const tab = (await browser.tabs.query({ active: true, windowId }))[0];
+  const next = siteOf(tab && tab.url);
+  tabUrl = (tab && tab.url) || '';
+  if (next !== domain) {
+    domain = next;
+    codeOpen = false;
+    logEl.scrollTop = 0;
   }
+  refresh();
 }
 
 browser.runtime.onMessage.addListener(msg => {
   if (msg && msg.cmd === 'AIEvent') refresh();
 });
-
-async function sendFollowup() {
-  const el = $('cm-followup');
-  const prompt = el.value.trim();
-  if (!prompt) return;
-  el.value = '';
-  try {
-    await sendCmdDirectly('AIGenerate', { prompt });
-    refresh();
-  } catch (e) {
-    statusEl.innerHTML = `<span style="color:#d32f2f">${esc(e)}</span>`;
-  }
-}
-$('cm-send').addEventListener('click', sendFollowup);
-$('cm-followup').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendFollowup(); }
+browser.tabs.onActivated.addListener(info => {
+  if (info.windowId === windowId) followTab();
+});
+browser.tabs.onUpdated.addListener((tabId, info, tab) => {
+  if (tab.windowId === windowId && tab.active && info.url) followTab();
 });
 
-refresh();
+function autosize() {
+  inputEl.style.height = 'auto';
+  inputEl.style.height = `${Math.min(inputEl.scrollHeight + 2, 200)}px`;
+}
+inputEl.addEventListener('input', autosize);
+
+async function send() {
+  const prompt = inputEl.value.trim();
+  if (!prompt || $('send').disabled) return;
+  inputEl.value = '';
+  autosize();
+  try {
+    await sendCmdDirectly('AIGenerate', { prompt });
+  } catch (e) {
+    inputEl.value = prompt;
+    autosize();
+    setStatus('bad', esc(e));
+  }
+  refresh();
+}
+$('send').addEventListener('click', send);
+inputEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
+});
+$('new').addEventListener('click', async () => {
+  try {
+    await sendCmdDirectly('AINewChat', { domain });
+  } catch (e) {
+    setStatus('bad', esc(e));
+  }
+  refresh();
+  inputEl.focus();
+});
+
+(async () => {
+  windowId = (await browser.windows.getCurrent()).id;
+  await followTab();
+})();

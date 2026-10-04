@@ -49,6 +49,8 @@ const jobs = new Map();
 const pings = new Map();
 /** @type {Map<string, string>} domain -> claude sessionId (conversation memory) */
 const sessions = new Map();
+/** @type {Map<string, string[]>} domain -> requestIds of that site's conversation, oldest first */
+const threads = new Map();
 let activeRequestId = null;
 
 const delay = ms => new Promise(r => setTimeout(r, ms));
@@ -393,6 +395,8 @@ addOwnCommands({
     // lands on the job and is therefore visible.
     jobs.set(requestId, job);
     activeRequestId = requestId;
+    if (!threads.has(domain)) threads.set(domain, []);
+    threads.get(domain).push(requestId);
     broadcast(job, { type: 'progress' });
 
     // Page capture + the write -> apply -> observe -> fix loop run in the background;
@@ -411,10 +415,35 @@ addOwnCommands({
     return jobHeader(job);
   },
 
-  /** Snapshot of the active/most-recent job for the sidebar to render on open. */
-  AIGetState() {
-    const job = activeRequestId && jobs.get(activeRequestId);
-    return job ? fullJob(job) : null;
+  /**
+   * Snapshot for the sidebar. With `domain`, returns that site's conversation (every job
+   * in it, oldest first) plus a header for whatever job is running, possibly on another
+   * site. Without it, the active/most-recent job as before.
+   */
+  AIGetState({ domain } = {}) {
+    if (domain == null) {
+      const job = activeRequestId && jobs.get(activeRequestId);
+      return job ? fullJob(job) : null;
+    }
+    const active = activeRequestId && jobs.get(activeRequestId);
+    const s = findScript(domain);
+    return {
+      domain,
+      thread: (threads.get(domain) || []).map(id => jobs.get(id)).filter(Boolean).map(fullJob),
+      running: active && active.status === 'running' ? jobHeader(active) : null,
+      script: s ? { id: s.props.id, enabled: !!s.config?.enabled } : null,
+    };
+  },
+
+  /** Forget a site's conversation so the next request starts a fresh Claude session. */
+  AINewChat({ domain } = {}) {
+    const ids = threads.get(domain) || [];
+    if (ids.some(id => jobs.get(id)?.status === 'running')) {
+      throw 'Claude is still working on this site.';
+    }
+    ids.forEach(id => jobs.delete(id));
+    threads.delete(domain);
+    sessions.delete(domain);
   },
 });
 
@@ -624,7 +653,8 @@ async function finalize(job, res) {
 }
 
 function broadcastNote(job, text) {
-  job.events.push({ type: 'narration', text });
+  // 'note' = ClaudeMonkey's own progress line, rendered apart from Claude's narration.
+  job.events.push({ type: 'note', text });
   broadcast(job, { type: 'narration', text });
 }
 
