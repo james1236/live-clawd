@@ -13,8 +13,15 @@ dir="$HOME/.claudemonkey/live"
 [ -n "$(find "$dir/alive" -newermt '20 seconds ago' 2>/dev/null)" ] || exit 0
 spool="$dir/spool"
 mkdir -p "$spool" 2>/dev/null || exit 0
+# Which tmux window this Claude session lives in, so Clawd can say where to look.
+win=""
+[ -n "$TMUX_PANE" ] && win=$(tmux display-message -p -t "$TMUX_PANE" '#I #W' 2>/dev/null | tr -cd '[:alnum:] ._-' | cut -c1-40)
 f="$spool/$(date +%s%N)-$$.json"
-# Cap the size (a big Write carries the whole file); the bridge drops what won't parse.
-head -c 262144 > "$f.tmp" 2>/dev/null && mv "$f.tmp" "$f" 2>/dev/null
+{
+  printf '{"tmux":"%s","hook":' "$win"
+  # Cap the size (a big Write carries the whole file); the bridge drops what won't parse.
+  head -c 262144
+  printf '}'
+} > "$f.tmp" 2>/dev/null && mv "$f.tmp" "$f" 2>/dev/null
 rm -f "$f.tmp" 2>/dev/null
 exit 0

@@ -13,7 +13,7 @@
  * Everything lives in a closed shadow root on a fixed, click-through layer, built with
  * DOM APIs (no innerHTML) so it works on pages enforcing Trusted Types.
  */
-import { CLAWD_CSS, VIEWBOX, clawdSpriteNode, setMood } from '@/common/clawd-art';
+import { CLAWD_CSS, VIEWBOX, clawdSpriteNode, eyeOffset, lookAt, setMood, tossBottle } from '@/common/clawd-art';
 import { MOOD_LABEL } from '@/common/clawd-actions';
 
 function install() {
@@ -38,9 +38,28 @@ function install() {
 .hl.ok { border-color: #4f9a45; border-style: solid; background: rgba(79, 154, 69, .12); }
 .sprite { position: absolute; left: 0; top: 0; width: ${SPRITE_W}px; height: ${SPRITE_H}px; will-change: transform;
   filter: drop-shadow(0 2px 2px rgba(0,0,0,.25)); }
-.face { width: 100%; height: 100%; transition: transform .15s; }
-.face.flip { transform: scaleX(-1); }
-.face.flip .cw-sign-text { transform: scaleX(-1); transform-origin: 16.7px 0; } /* keep "Aa" readable */
+.clip, .face, .turn { position: absolute; inset: 0; }
+.turn { transition: transform .15s; }
+.turn.flip { transform: scaleX(-1); }
+.turn.flip .cw-sign-text { transform: scaleX(-1); transform-origin: 16.7px 0; } /* keep signs readable */
+/* the clickable bit: just Clawd's body, so he doesn't swallow clicks around him */
+.hit { position: absolute; left: ${(3 - VIEWBOX.x) * UNIT}px; top: ${(0 - VIEWBOX.y) * UNIT}px;
+  width: ${10 * UNIT}px; height: ${10 * UNIT}px; pointer-events: auto; cursor: pointer; }
+/* portal-gun entrances and exits: he rises out of / sinks into a swirling green portal */
+.portal { position: absolute; left: ${FOOT_X - 44}px; top: ${FOOT_Y - 9}px; width: 88px; height: 20px; border-radius: 50%;
+  background: radial-gradient(ellipse at center, #f2ffe0 0 16%, #9be35a 38%, #39a83a 62%, rgba(40,140,40,0) 72%);
+  box-shadow: 0 0 16px 5px rgba(130,230,90,.6); transform: scale(0, .3); opacity: 0; overflow: hidden;
+  transition: transform .28s cubic-bezier(.3, 1.6, .6, 1), opacity .2s; }
+.portal::after { content: ""; position: absolute; inset: 2px 6px; border-radius: 50%;
+  background: conic-gradient(rgba(255,255,255,.7), transparent 30%, rgba(255,255,255,.45) 55%, transparent 80%); animation: spin .5s linear infinite; }
+.portal.open { transform: scale(1, 1); opacity: 1; }
+.sprite.emerging .clip, .sprite.sinking .clip { clip-path: inset(-300px -300px ${SPRITE_H - FOOT_Y}px -300px); }
+@keyframes emerge { from { transform: translateY(${Math.round(FOOT_Y)}px); } to { transform: none; } }
+@keyframes sink { from { transform: none; } to { transform: translateY(${Math.round(FOOT_Y + 8)}px); } }
+.sprite.emerging .face { animation: emerge .5s cubic-bezier(.2, .9, .3, 1.2) .22s both; }
+.sprite.sinking .face { animation: sink .45s ease-in forwards; }
+.sprite.emerging .label, .sprite.emerging .tag, .sprite.emerging .water,
+.sprite.sinking .label, .sprite.sinking .tag, .sprite.sinking .water { opacity: 0; transition: opacity .15s; }
 .label { position: absolute; left: 50%; bottom: calc(100% + 2px); transform: translateX(-50%); white-space: nowrap;
   max-width: 260px; overflow: hidden; text-overflow: ellipsis; padding: 3px 9px; border-radius: 10px;
   background: #1f1e1d; color: #faf9f5; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
@@ -98,6 +117,13 @@ function install() {
 ${CLAWD_CSS}`;
 
   const COLORS = ['#d97757', '#5b8fd9', '#4fa36b', '#a777d6', '#d9a13b', '#d0607e'];
+  const BELOW = 38; // room under his feet for the name tag and water counter
+  const EYES = eyeOffset(SPRITE_W);
+  const NEAR = 190; // px: eyes follow the cursor within this
+  const TICKLES = ['Hehe! 😆', 'Hahaha, stop it!', 'I’m trying to work here! 😂', 'OK OK, you win! 🏳️'];
+  let mouse = null;
+  window.addEventListener('mousemove', e => { mouse = { x: e.clientX, y: e.clientY }; }, { passive: true, capture: true });
+  document.addEventListener('mouseleave', () => { mouse = null; }, { passive: true });
   let host, layer;
   let raf = 0;
   let lastT = 0;
@@ -148,19 +174,29 @@ ${CLAWD_CSS}`;
     const color = COLORS[colorIx++ % COLORS.length];
     root.style.setProperty('--clawd', color);
     hl.style.setProperty('--accent', color);
-    const face = el('div', 'face', root);
+    const portal = el('div', 'portal', root);
+    const clip = el('div', 'clip', root);
+    const face = el('div', 'face', clip);
+    const turn = el('div', 'turn', face);
     const svg = clawdSpriteNode(document, SPRITE_W);
-    face.appendChild(svg);
+    turn.appendChild(svg);
+    const hit = el('div', 'hit', root);
     c = {
-      id, hl, root, face, svg,
+      id, hl, root, face, turn, svg, portal,
       fx: el('div', 'fx', hl),
       label: el('div', 'label', root),
       tagEl: el('div', 'tag', root, tag || ''),
       waterEl: el('div', 'water', root),
       target: null, action: null, pos: null, mood: 'idle', actMood: 'idle',
       leaveTimer: 0, leaving: false, live: false,
-      waterUntil: 0, nextWater: 0, litres: 0,
+      waterUntil: 0, nextWater: 0, litres: 0, throwUntil: 0,
+      phase: null, phaseAt: 0, then: null,
+      lastRect: null, lostAt: 0, retryUntil: 0, retryAt: 0,
+      tickleUntil: 0, tickles: 0, lastTickle: 0, noticeUntil: 0, near: false, extra: '',
     };
+    const stop = e => { e.stopPropagation(); e.preventDefault(); };
+    hit.addEventListener('mousedown', stop);
+    hit.addEventListener('click', e => { stop(e); tickle(c); });
     // Later Clawds stand a little to the side so they don't stack exactly.
     c.offset = (clawds.size % 3) * 40;
     clawds.set(id, c);
@@ -236,17 +272,22 @@ ${CLAWD_CSS}`;
       }
       return null;
     };
+    // One pass over the tree, then pick by the caller's priority (the most specific
+    // component first; a parent like the file's own component is only a fallback).
+    const found = new Map();
     const stack = [rootFiber.current || rootFiber];
-    for (let seen = 0; stack.length && seen < 30000; seen++) {
+    for (let seen = 0; stack.length && seen < 30000 && found.size < want.size; seen++) {
       const f = stack.pop();
       if (!f) continue;
-      if (want.has(nameOf(f))) {
+      const nm = nameOf(f);
+      if (want.has(nm) && !found.has(nm)) {
         const n = hostNode(f.child || f);
-        if (n) return n;
+        if (n) found.set(nm, n);
       }
       if (f.sibling) stack.push(f.sibling);
       if (f.child) stack.push(f.child);
     }
+    for (const nm of names) if (found.has(nm)) return found.get(nm);
     return null;
   }
 
@@ -277,34 +318,51 @@ ${CLAWD_CSS}`;
   const vp = () => ({ w: window.innerWidth, h: window.innerHeight });
 
   /** Where a Clawd should stand: on its target's top edge, else along the bottom. */
-  function destination(c) {
+  /**
+   * The target's box. When it leaves the DOM (removed, or re-rendered by hot reload) the
+   * last box is kept for a few seconds — he's vacuuming up exactly that spot — and then
+   * the action's targets are looked up again (e.g. the component around it).
+   */
+  function rectOf(c, now) {
+    if (c.target && c.target.isConnected) {
+      c.lastRect = c.target.getBoundingClientRect();
+      c.lostAt = 0;
+      return c.lastRect;
+    }
+    if (!c.lastRect) return null;
+    if (!c.lostAt) c.lostAt = now;
+    if (now - c.lostAt < 5000) return c.lastRect;
+    c.lastRect = null;
+    c.target = c.action ? findTarget(c.action) : null;
+    return c.target ? rectOf(c, now) : null;
+  }
+
+  function destination(c, now) {
     const { w, h } = vp();
     let fx;
     let fy;
-    if (c.leaving) {
-      return { x: w + 40, y: c.pos ? c.pos.y : h - SPRITE_H };
-    }
-    if (c.target && c.target.isConnected) {
-      const r = c.target.getBoundingClientRect();
+    const r = rectOf(c, now);
+    if (r) {
       fx = r.left + Math.min(56, r.width / 2) + c.offset;
       fy = r.top > SPRITE_H + 24 ? r.top + 4 : Math.min(r.bottom, r.top + SPRITE_H + 12);
     } else {
       fx = w - 70 - c.offset * 2;
-      fy = h - 14;
+      fy = h - BELOW;
     }
+    // Keep all of him on screen: caption above, name tag and water counter below.
     fx = Math.max(FOOT_X + 4, Math.min(w - (SPRITE_W - FOOT_X) - 4, fx));
-    fy = Math.max(FOOT_Y + 26, Math.min(h - 6, fy));
+    fy = Math.max(FOOT_Y + 26, Math.min(h - BELOW, fy));
     return { x: fx - FOOT_X, y: fy - FOOT_Y };
   }
 
-  function placeHighlight(c) {
+  function placeHighlight(c, now) {
     const { hl } = c;
-    if (c.leaving || !c.target || !c.target.isConnected || !c.action && c.actMood !== 'done') {
+    const r = !c.phase && (c.action || c.actMood === 'done') ? rectOf(c, now) : null;
+    if (!r) {
       hl.classList.remove('on');
       return;
     }
     const { w, h } = vp();
-    const r = c.target.getBoundingClientRect();
     const l = Math.max(2, r.left - 4);
     const t = Math.max(2, r.top - 4);
     const rr = Math.min(w - 2, r.right + 4);
@@ -332,54 +390,154 @@ ${CLAWD_CSS}`;
     c.label.style.left = `${Math.round(centre - c.pos.x)}px`;
   }
 
-  function show(c, m) {
-    if (m === c.mood) return;
+  function show(c, m, now) {
+    const extra = [c.tickleUntil > now && 'cw-tickle', c.noticeUntil > now && 'cw-notice'].filter(Boolean).join(' ');
+    if (m === c.mood && extra === c.extra) return;
     c.mood = m;
-    setMood(c.svg, m);
+    c.extra = extra;
+    setMood(c.svg, m, extra);
+  }
+
+  function currentLabel(c) {
+    return c.action ? c.action.label : MOOD_LABEL[c.actMood] || '';
+  }
+
+  function tickle(c) {
+    const now = performance.now();
+    if (now - c.lastTickle > 3000) c.tickles = 0;
+    c.lastTickle = now;
+    setLabel(c, TICKLES[Math.min(c.tickles++, TICKLES.length - 1)]);
+    c.tickleUntil = now + 1300;
+  }
+
+  /** Portal in (he rises out of it) — on arrival and at the end of a teleport. */
+  function startIn(c, now) {
+    c.phase = 'in';
+    c.phaseAt = now;
+    c.root.classList.add('emerging');
+    c.portal.classList.add('open');
+  }
+
+  /** Portal out (he sinks into it), then vanish or reappear at his destination. */
+  function startOut(c, now, then) {
+    c.phase = 'out';
+    c.phaseAt = now;
+    c.then = then;
+    c.portal.classList.add('open');
+  }
+
+  /** Advance a portal animation; returns false if the Clawd is gone. */
+  function stepPhase(c, now, dest) {
+    const t = now - c.phaseAt;
+    if (c.phase === 'in') {
+      if (t > 650) c.portal.classList.remove('open');
+      if (t > 850) { c.phase = null; c.root.classList.remove('emerging'); }
+    } else {
+      if (t > 160) c.root.classList.add('sinking');
+      if (t > 640) c.portal.classList.remove('open');
+      if (t > 860) {
+        c.root.classList.remove('sinking');
+        if (c.then === 'remove') { removeClawd(c); return false; }
+        c.pos = { ...dest };
+        startIn(c, now);
+      }
+    }
+    return true;
+  }
+
+  /** Eyes follow a nearby cursor; he gives a little start when it first comes close. */
+  function watchCursor(c, now) {
+    if (!mouse) { if (c.near) { c.near = false; lookAt(c.svg, null); } return; }
+    const flip = c.turn.classList.contains('flip');
+    const ex = c.pos.x + (flip ? SPRITE_W - EYES.x : EYES.x);
+    const ey = c.pos.y + EYES.y;
+    const dx = mouse.x - ex;
+    const dy = mouse.y - ey;
+    const near = Math.hypot(dx, dy) < NEAR;
+    if (near) {
+      if (!c.near && ['idle', 'done', 'think', 'read'].includes(c.actMood)) c.noticeUntil = now + 350;
+      lookAt(c.svg, flip ? -dx : dx, dy);
+    } else if (c.near) {
+      lookAt(c.svg, null);
+    }
+    c.near = near;
+  }
+
+  /** Where his hand is, in viewport px (for the bottle toss). */
+  function handPos(c) {
+    const flip = c.turn.classList.contains('flip');
+    const hx = (15 - VIEWBOX.x) * UNIT;
+    return { x: c.pos.x + (flip ? SPRITE_W - hx : hx), y: c.pos.y + (1 - VIEWBOX.y) * UNIT, dir: flip ? -1 : 1 };
   }
 
   function step(c, now, dt) {
-    const dest = destination(c);
-    if (!c.pos) c.pos = { x: vp().w + 20, y: dest.y }; // walk in from the right edge
+    // Targets that aren't rendered yet (hot reload still applying) get a few retries.
+    if (c.retryUntil > now && now > c.retryAt) {
+      c.retryAt = now + 400;
+      const t = findTarget(c.action || {});
+      if (t) { c.target = t; c.retryUntil = 0; }
+    }
+    const dest = destination(c, now);
+    if (!c.pos) { c.pos = { ...dest }; startIn(c, now); }
+    if (c.leaving && !c.phase) startOut(c, now, 'remove');
+    if (c.phase) {
+      if (!stepPhase(c, now, dest)) return;
+      show(c, c.phase === 'in' ? 'idle' : c.mood, now);
+      c.root.style.transform = `translate(${Math.round(c.pos.x)}px, ${Math.round(c.pos.y)}px)`;
+      placeLabel(c);
+      placeHighlight(c, now);
+      return;
+    }
     const dx = dest.x - c.pos.x;
     const dy = dest.y - c.pos.y;
     const dist = Math.hypot(dx, dy);
+    // Far away? Portal there instead of a long walk.
+    if (dist > 520) { startOut(c, now, 'teleport'); return; }
     const walking = dist > (c.mood === 'walk' ? 2 : 36);
+    watchCursor(c, now);
+    if (c.tickleUntil && now > c.tickleUntil) { c.tickleUntil = 0; setLabel(c, c.waterUntil ? MOOD_LABEL.water : currentLabel(c)); }
     if (walking) {
       const s = Math.min(dist, SPEED * dt);
       c.pos.x += dx / dist * s;
       c.pos.y += dy / dist * s;
-      if (Math.abs(dx) > 2) c.face.classList.toggle('flip', dx < 0);
-      show(c, 'walk');
-    } else if (c.leaving) {
-      removeClawd(c);
-      return;
+      if (Math.abs(dx) > 2) c.turn.classList.toggle('flip', dx < 0);
+      show(c, 'walk', now);
     } else {
       // Small drifts (scrolling a little) are followed without breaking into a walk.
       if (dist > 0.5) { c.pos.x += dx * 0.3; c.pos.y += dy * 0.3; }
       const busy = !['done', 'error', 'idle', 'wave'].includes(c.actMood);
-      if (busy && now > c.nextWater && !c.waterUntil) {
-        c.waterUntil = now + 3200;
+      if (busy && now > c.nextWater && !c.waterUntil && !c.throwUntil) {
+        c.waterUntil = now + 3000; // matches the one-shot drinking animation
         c.litres += 0.5;
         c.waterEl.textContent = `💧 ${c.litres.toFixed(1)} L`;
         c.waterEl.classList.add('on');
       }
       if (c.waterUntil && now > c.waterUntil) {
+        // Empty: wind up and chuck the bottle at the cursor.
         c.waterUntil = 0;
+        c.throwUntil = now + 450;
         c.nextWater = now + 22000 + Math.random() * 20000;
+      }
+      if (c.throwUntil && now > c.throwUntil) {
+        c.throwUntil = 0;
+        const hand = handPos(c);
+        const aim = mouse || { x: hand.x + hand.dir * 260, y: hand.y - 220 };
+        tossBottle(document, layer, hand.x, hand.y, aim.x, aim.y);
         c.waterEl.classList.remove('on');
-        setLabel(c, c.action ? c.action.label : c.label.textContent);
+        setLabel(c, currentLabel(c));
       }
       if (c.waterUntil) {
-        setLabel(c, MOOD_LABEL.water);
-        show(c, 'water');
+        if (!c.tickleUntil) setLabel(c, MOOD_LABEL.water);
+        show(c, 'water', now);
+      } else if (c.throwUntil) {
+        show(c, 'throw', now);
       } else {
-        show(c, c.actMood);
+        show(c, c.actMood, now);
       }
     }
     c.root.style.transform = `translate(${Math.round(c.pos.x)}px, ${Math.round(c.pos.y)}px)`;
     placeLabel(c);
-    placeHighlight(c);
+    placeHighlight(c, now);
   }
 
   function tick(now) {
@@ -495,9 +653,15 @@ ${CLAWD_CSS}`;
     c.leaving = false;
     c.action = a;
     c.live = !!a.live;
+    if (a.tag != null) c.tagEl.textContent = a.tag;
+    // The attention sign can say which tmux window wants you.
+    const sign = c.svg.querySelector('.cw-p-ask text');
+    if (sign) sign.textContent = a.sign || '!?';
     const t = findTarget(a);
+    c.retryUntil = !t && ((a.components && a.components.length) || (a.selectors && a.selectors.length)) ? performance.now() + 4000 : 0;
     if (t) {
       c.target = t;
+      c.lastRect = null;
       const r = t.getBoundingClientRect();
       // A Clawdify job may bring its target into view; Live Clawd never moves your page.
       if (!c.live && (r.bottom < 0 || r.top > vp().h)) t.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -530,6 +694,7 @@ ${CLAWD_CSS}`;
   function leave(c) {
     c.action = null;
     c.target = null;
+    c.lastRect = null;
     setLabel(c, c.actMood === 'error' ? '' : 'Bye! 👋');
     c.leaving = true;
   }
@@ -544,6 +709,7 @@ ${CLAWD_CSS}`;
     }
     ensureLayer();
     const c = getClawd(id, msg.tag);
+    if (msg.tag != null) c.tagEl.textContent = msg.tag;
     if (msg.op === 'act') act(c, msg);
     else if (msg.op === 'done') finish(c, true);
     else if (msg.op === 'error') finish(c, false);

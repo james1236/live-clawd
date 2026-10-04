@@ -464,7 +464,61 @@ function lastNarration(transcript) {
   return '';
 }
 
+// --- What actually changed on disk (however Claude edited: Edit, sed, python, git…) ---
+const SOURCE_FILE = /\.(tsx?|jsx?|vue|svelte|astro|html?|css|scss|sass|less|styl|mdx?)$/i;
+/** @type {Map<string, {seen: Map<string, string>, dirty: Set<string>, at: number}>} per project root */
+const projects = new Map();
+
+function git(root, args) {
+  return execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', timeout: 2000, maxBuffer: 8 << 20, stdio: ['ignore', 'pipe', 'ignore'] });
+}
+
+/** Lines in `b` that aren't in `a` (multiset difference, trimmed, blank lines ignored). */
+function lineDiff(a, b) {
+  const count = new Map();
+  for (const l of a.split('\n')) { const t = l.trim(); if (t) count.set(t, (count.get(t) || 0) + 1); }
+  const out = [];
+  for (const l of b.split('\n')) {
+    const t = l.trim();
+    if (!t) continue;
+    const n = count.get(t) || 0;
+    if (n) count.set(t, n - 1); else out.push(t);
+  }
+  return out;
+}
+
+/** Source files changed since we last looked, with their added/removed lines. */
+function scanChanges(root) {
+  let st = projects.get(root);
+  if (!st) projects.set(root, st = { seen: new Map(), dirty: new Set(), at: 0 });
+  let status;
+  try { status = git(root, ['status', '--porcelain', '-uall']); } catch { return []; }
+  const dirtyNow = new Set(status.split('\n').map(l => l.slice(3).trim().replace(/^.* -> /, '')).filter(f => SOURCE_FILE.test(f)));
+  // Files that were dirty and are clean again were restored (e.g. git checkout).
+  const candidates = new Set([...dirtyNow, ...[...st.dirty].filter(f => !dirtyNow.has(f))]);
+  st.dirty = dirtyNow;
+  const changes = [];
+  for (const f of candidates) {
+    let now = '';
+    try { now = fs.readFileSync(path.join(root, f), 'utf8'); } catch { /* deleted */ }
+    let before = st.seen.get(f);
+    if (before == null) {
+      try { before = git(root, ['show', `HEAD:${f}`]); } catch { before = ''; }
+    }
+    st.seen.set(f, now);
+    if (before === now) continue;
+    changes.push({ file: f, added: lineDiff(before, now).join('\n').slice(0, 6000), removed: lineDiff(now, before).join('\n').slice(0, 6000) });
+  }
+  return changes.slice(0, 3);
+}
+
 function relayLive(ev) {
+  // live-hook.sh wraps the hook JSON with the tmux window it ran in.
+  let tmux = '';
+  if (ev && ev.hook && typeof ev.hook === 'object') {
+    tmux = String(ev.tmux || '');
+    ev = ev.hook;
+  }
   if (!ev || !ev.cwd) return;
   const root = projectRoot(ev.cwd);
   const cfg = loadLiveConfig();
@@ -477,7 +531,17 @@ function relayLive(ev) {
     project: path.basename(root),
     event: ev.hook_event_name,
     ports,
+    tmux,
   };
+  if (ev.hook_event_name === 'PostToolUse') {
+    // Only tools that can touch files; report what really changed on disk.
+    if (!/^(Bash|Edit|Write|MultiEdit|NotebookEdit)$/.test(ev.tool_name || '')) return;
+    const changes = scanChanges(root);
+    if (!changes.length) return;
+    out.changes = changes;
+    sendMessage(out);
+    return;
+  }
   if (ev.hook_event_name === 'PreToolUse') {
     const input = ev.tool_input || {};
     out.tool = ev.tool_name;

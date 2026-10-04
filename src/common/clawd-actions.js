@@ -214,6 +214,44 @@ function classifySource(name, detail, file) {
 }
 
 /**
+ * React components a chunk of JSX is about, best first: components defined in it (and
+ * so most likely the thing changing), else the JSX elements it uses — never TS generics
+ * like FC<Props>, and not the internals of a component that is itself defined here.
+ */
+function jsxTags(text) {
+  text = String(text);
+  const used = [...new Set([...text.matchAll(/(?:^|[\s({,]|return\s)<([A-Z]\w*)(?=[\s/>])/gm)].map(m => m[1]))];
+  const defined = [...new Set([...text.matchAll(/\b(?:function|const|let|class)\s+([A-Z]\w*)/g)].map(m => m[1]))]
+    .filter(n => used.includes(n) || /^\s*(export\s+)?(default\s+)?function\s/m.test(text));
+  return defined.length ? defined.filter(n => !/Props$|Type$/.test(n)) : used;
+}
+
+/**
+ * Live Clawd: a change detected on disk after a tool ran (added/removed lines of one
+ * file). Works however Claude edited — Edit tool, sed, a python heredoc, git checkout.
+ * @param {{file: string, added: string, removed: string}} change
+ * @return {ClawdAction}
+ */
+export function classifyChange({ file, added = '', removed = '' }) {
+  const short = fileName(file);
+  const addTags = jsxTags(added);
+  const delTags = jsxTags(removed);
+  const base = classifySource('Edit', added || removed, file);
+  const fileComps = base.components || [];
+  // Whole elements going away or coming back are the most visible changes.
+  if (delTags.length && !addTags.length && removed.length > added.length) {
+    return { ...base, kind: 'remove', components: [...delTags, ...fileComps], label: `Vacuuming up <${delTags[0]}>` };
+  }
+  if (addTags.length && !delTags.length && added.length > removed.length) {
+    return { ...base, kind: 'add', components: [...addTags, ...fileComps], label: `Adding <${addTags[0]}>` };
+  }
+  if (!added.trim() && removed.trim()) {
+    return { ...base, kind: 'erase', components: fileComps, label: `Trimming ${short}` };
+  }
+  return base;
+}
+
+/**
  * @param {string} name tool name (Edit, Write, Grep, Read, Bash, ...)
  * @param {string} [detail] edited code, grep pattern, file name or command
  * @param {string} [file] for Live Clawd: the edited/read file, relative to the project

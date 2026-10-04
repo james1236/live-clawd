@@ -16,7 +16,7 @@
 import '@/common/browser';
 import { sendCmdDirectly } from '@/common';
 import { clawdSvg, esc, injectTheme, siteOf } from '@/common/cm-theme';
-import { CLAWD_CSS, clawdSpriteHtml, setMood } from '@/common/clawd-art';
+import { CLAWD_CSS, clawdSpriteHtml, eyeOffset, lookAt, setMood, tossBottle } from '@/common/clawd-art';
 import { MOOD_LABEL } from '@/common/clawd-actions';
 
 injectTheme(`${CLAWD_CSS}
@@ -99,7 +99,7 @@ document.body.innerHTML = `
   <div class="watches" id="watches"></div>
   <div class="log" id="log"></div>
   <div class="stage">
-    <div class="mascot" id="mascot" title="Hi, I'm Clawd!">${clawdSpriteHtml(112)}</div>
+    <div class="mascot" id="mascot" title="Click to tickle">${clawdSpriteHtml(112)}</div>
     <div class="speech" id="speech">Hi!</div>
     <div class="waterc" id="waterc" title="Water guzzled so far (it's a joke)"></div>
   </div>
@@ -140,8 +140,15 @@ let waterUntil = 0;
 let nextWater = 0;
 let litres = 0;
 try { litres = +localStorage.getItem(LITRES_KEY) || 0; } catch { /* storage blocked */ }
-let poked = false;
-const HELLOS = ['Hi! I’m Clawd 👋', 'That tickles!', 'Ready to remodel the web!', '*happy pixel noises*', 'Need anything changed?'];
+let tickleUntil = 0;
+let tickles = 0;
+let lastTickle = 0;
+let throwUntil = 0;
+let tickleText = '';
+let mouse = null;
+const TICKLES = ['Hehe! 😆', 'Hahaha, stop it!', 'I’m trying to work here! 😂', 'OK OK, you win! 🏳️'];
+const MASCOT_W = 112;
+const EYES = eyeOffset(MASCOT_W);
 
 function showWater() {
   $('waterc').textContent = litres ? `💧 ${litres.toFixed(1)} L guzzled` : '';
@@ -149,9 +156,11 @@ function showWater() {
 showWater();
 
 function paintStage() {
-  const drinking = waterUntil > Date.now();
-  setMood(spriteEl, drinking ? 'water' : stageMood, poked ? 'cw-poke' : '');
-  $('speech').textContent = drinking ? MOOD_LABEL.water : stageText;
+  const now = Date.now();
+  const drinking = waterUntil > now;
+  const mood = drinking ? 'water' : throwUntil > now ? 'throw' : stageMood;
+  setMood(spriteEl, mood, tickleUntil > now ? 'cw-tickle' : '');
+  $('speech').textContent = tickleUntil > now ? tickleText : drinking ? MOOD_LABEL.water : stageText;
 }
 
 function setStage(mood, text, color) {
@@ -161,28 +170,53 @@ function setStage(mood, text, color) {
   paintStage();
 }
 
+// Click to tickle him.
 mascotEl.addEventListener('click', () => {
-  poked = true;
-  const before = stageText;
-  if (!busy) stageText = HELLOS[Math.floor(Math.random() * HELLOS.length)];
+  const now = Date.now();
+  if (now - lastTickle > 3000) tickles = 0;
+  lastTickle = now;
+  tickleText = TICKLES[Math.min(tickles++, TICKLES.length - 1)];
+  tickleUntil = now + 1300;
   paintStage();
-  setTimeout(() => {
-    poked = false;
-    if (!busy && stageText !== before) stageText = before;
-    paintStage();
-  }, 1400);
+  setTimeout(paintStage, 1350);
 });
 
-// Water breaks while working: AI is thirsty work.
+// His eyes follow the cursor when it's near.
+let near = false;
+document.addEventListener('mousemove', e => {
+  mouse = { x: e.clientX, y: e.clientY };
+  const r = spriteEl.getBoundingClientRect();
+  const dx = e.clientX - (r.left + EYES.x);
+  const dy = e.clientY - (r.top + EYES.y);
+  const isNear = Math.hypot(dx, dy) < 220;
+  if (isNear) lookAt(spriteEl, dx, dy);
+  else if (near) lookAt(spriteEl, null);
+  near = isNear;
+}, { passive: true });
+document.addEventListener('mouseleave', () => {
+  mouse = null;
+  if (near) { near = false; lookAt(spriteEl, null); }
+});
+
+// Water breaks while working (AI is thirsty work), then the empty bottle gets chucked at you.
 setInterval(() => {
   const now = Date.now();
   if (waterUntil && now > waterUntil) {
     waterUntil = 0;
+    throwUntil = now + 450;
     paintStage();
+    setTimeout(() => {
+      const r = spriteEl.getBoundingClientRect();
+      const hx = r.left + r.width * 0.78;
+      const hy = r.top + r.height * 0.45;
+      const aim = mouse || { x: hx + 140, y: hy - 160 };
+      tossBottle(document, document.body, hx, hy, aim.x, aim.y);
+      paintStage();
+    }, 450);
   }
   if (!busy) { nextWater = 0; return; }
   if (!nextWater) nextWater = now + 8000 + Math.random() * 8000;
-  if (!waterUntil && now > nextWater) {
+  if (!waterUntil && !throwUntil && now > nextWater) {
     waterUntil = now + 3000;
     nextWater = now + 25000 + Math.random() * 20000;
     litres += 0.5;
@@ -190,7 +224,8 @@ setInterval(() => {
     showWater();
     paintStage();
   }
-}, 500);
+  if (throwUntil && now > throwUntil) throwUntil = 0;
+}, 250);
 
 /** Decide what Clawd is doing from the site's state. */
 function stageFor(thread, running, busyHere) {

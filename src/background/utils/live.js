@@ -8,7 +8,7 @@
  */
 import { addOwnCommands } from './init';
 import { busyTabIds, clawdNow } from './ai';
-import { classifyTool, MOOD_LABEL } from '@/common/clawd-actions';
+import { classifyChange, classifyTool, MOOD_LABEL } from '@/common/clawd-actions';
 
 const HOST_NAME = 'claudemonkey.bridge';
 const KEY = 'clawdifyLive';
@@ -74,8 +74,14 @@ function disconnect() {
 
 /** Turn a hook event into an overlay message. */
 function toOverlay(ev) {
-  const base = { id: `live:${ev.session}`, tag: ev.project, live: true };
+  // "3 claude" -> window 3, named "claude"
+  const [win, ...name] = String(ev.tmux || '').split(' ');
+  const where = win ? `tmux window ${win}${name.length ? ` (${name.join(' ')})` : ''}` : '';
+  const base = { id: `live:${ev.session}`, tag: win ? `${ev.project} · tmux ${win}` : ev.project, live: true };
   switch (ev.event) {
+  case 'PostToolUse':
+    // What really changed on disk, however Claude edited it.
+    return { ...base, op: 'act', ...classifyChange(ev.changes[0]) };
   case 'UserPromptSubmit':
     return { ...base, op: 'act', kind: 'think', selectors: [], label: ev.message ? `On it: “${ev.message}”` : 'New request!' };
   case 'PreToolUse': {
@@ -85,7 +91,14 @@ function toOverlay(ev) {
     return { ...base, op: 'act', ...a };
   }
   case 'Notification':
-    return { ...base, op: 'act', kind: 'wave', selectors: [], label: ev.message || MOOD_LABEL.wave };
+    return {
+      ...base,
+      op: 'act',
+      kind: 'wave',
+      selectors: [],
+      sign: win ? `#${win}` : '!?',
+      label: `${ev.message || MOOD_LABEL.wave}${where ? ` — ${where}` : ''}`,
+    };
   case 'Stop':
     return { ...base, op: 'done' };
   case 'SessionEnd':

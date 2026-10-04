@@ -63,7 +63,10 @@ const RIGHT = [
   ]),
   G('cw-prop cw-p-sponge', [R(15, 2, 3, 2.2, '#f5d061'), R(15.5, 2.5, 0.5, 0.5, '#d9ae35'), R(16.8, 3.3, 0.5, 0.5, '#d9ae35')]),
   G('cw-prop cw-p-sign', [R(15.5, 1, 0.8, 4, WOOD), R(14, -3.2, 5.5, 4.2, PAPER), T(14.4, 0, 3, '#1f1e1d', 'Aa', 'cw-sign-text')]),
-  G('cw-prop cw-p-hose', [R(15, 1, 1, 5, '#555'), R(14, 0, 3, 1.2, '#444')]),
+  G('cw-prop cw-p-hose', [
+    ['path', { d: 'M15.5 5.5 C 15.6 8.5, 17.2 9.2, 17.6 7', fill: 'none', stroke: '#666', 'stroke-width': 0.8 }],
+    R(15.1, 0.6, 0.8, 5, '#888'), R(13.6, -0.6, 3.8, 1.3, '#d9534f'), R(13.6, -0.6, 3.8, 0.4, '#2b2b2b'),
+  ]),
   G('cw-prop cw-p-bottle', [
     R(15, -3, 2.2, 6, 'rgba(120,190,240,.9)'), R(15, -3, 2.2, 1.6, 'rgba(255,255,255,.35)', 'cw-water-air'),
     R(15.4, -4, 1.4, 1, '#3a7bd5'), R(15, 0, 2.2, 1, '#ffffff'),
@@ -129,7 +132,7 @@ const FX = [
   heart(6.5, -6, 0.4, 'cw-heart cw-hh3'),
   G('cw-sweat', [R(12.6, -0.6, 0.8, 1.2, '#8cc4ef'), R(12.8, -1.2, 0.4, 0.6, '#8cc4ef')]),
   G('cw-notes', [T(-3.5, -1.5, 3, PAINT, '♪', 'cw-note cw-n1'), T(15.5, -3, 3.4, PAINT, '♫', 'cw-note cw-n2')]),
-  G('cw-glugs', [C(12.6, -2, 0.45, '#8cc4ef', 'cw-glug'), C(13.2, -3.6, 0.35, '#8cc4ef', 'cw-glug cw-g2'), C(12.2, -5, 0.3, '#8cc4ef', 'cw-glug cw-g3')]),
+  G('cw-glugs', [C(11.4, 1.6, 0.4, '#d6ecfb', 'cw-glug'), C(12.6, 0.6, 0.32, '#d6ecfb', 'cw-glug cw-g2'), C(13.6, -0.4, 0.28, '#d6ecfb', 'cw-glug cw-g3')]),
   G('cw-glints', [T(17.5, 0.5, 2.6, '#f2c94c', '✦', 'cw-glint'), T(-3.8, 0.5, 2, '#f2c94c', '✦', 'cw-glint cw-gl2'), T(14, -3.5, 1.8, '#f2c94c', '✦', 'cw-glint cw-gl3')]),
   G('cw-sparks', [T(17.5, -1.5, 2.6, '#f2c94c', '⚡', 'cw-spark'), T(-3.5, 2, 2.2, '#f2c94c', '⚡', 'cw-spark cw-sp2')]),
   G('cw-zap', [C(17, 2.5, 3.2, 'rgba(255,255,230,.9)', 'cw-flashburst')]),
@@ -194,6 +197,70 @@ export function setMood(svg, mood, extra = '') {
   svg.setAttribute('class', `cw-svg m-${mood}${extra ? ` ${extra}` : ''}`);
 }
 
+/**
+ * Point Clawd's eyes at something `dx`,`dy` CSS px away from his eyes (null to stop
+ * looking). Eyes move at most one Clawd pixel each way, like his idle glances.
+ */
+export function lookAt(svg, dx, dy) {
+  const look = svg.querySelector('.cw-look');
+  if (!look) return;
+  if (dx == null) {
+    look.style.removeProperty('animation');
+    look.style.removeProperty('transform');
+    return;
+  }
+  const d = Math.hypot(dx, dy) || 1;
+  const x = Math.round(dx / d * 1.2);
+  const y = Math.round(dy / d * 1.2);
+  look.style.setProperty('animation', 'none');
+  look.style.setProperty('transform', `translate(${Math.max(-1, Math.min(1, x))}px, ${Math.max(-1, Math.min(1, y))}px)`);
+}
+
+/** Where Clawd's eyes are within a sprite of `width` CSS px (for lookAt). */
+export const eyeOffset = width => ({ x: (8 - VIEWBOX.x) * width / VIEWBOX.w, y: (3 - VIEWBOX.y) * width / VIEWBOX.w });
+
+/**
+ * Fling an empty water bottle from (x, y) at (tx, ty) — page-fixed coordinates inside
+ * `parent` — and let it fly on, spinning, until it falls off the screen.
+ */
+export function tossBottle(doc, parent, x, y, tx, ty) {
+  const win = doc.defaultView;
+  const b = doc.createElement('div');
+  const st = b.style;
+  st.cssText = 'position:fixed;left:0;top:0;width:10px;height:22px;border-radius:3px 3px 4px 4px;'
+    + 'background:linear-gradient(rgba(255,255,255,.55) 0 70%, rgba(120,190,240,.9) 70%);'
+    + 'box-shadow:inset 0 0 0 1px rgba(58,123,213,.5);pointer-events:none;z-index:2147483647;will-change:transform';
+  const cap = doc.createElement('div');
+  cap.style.cssText = 'position:absolute;left:2px;top:-4px;width:6px;height:4px;border-radius:2px 2px 0 0;background:#3a7bd5';
+  const label = doc.createElement('div');
+  label.style.cssText = 'position:absolute;left:0;right:0;top:8px;height:5px;background:#fff';
+  b.append(cap, label);
+  parent.appendChild(b);
+  const g = 1800; // px/s²
+  const flight = Math.max(0.35, Math.min(0.8, Math.hypot(tx - x, ty - y) / 900)); // time to reach the cursor
+  let vx = (tx - x) / flight;
+  let vy = (ty - y) / flight - g * flight / 2;
+  if (!Number.isFinite(vx)) { vx = -300; vy = -600; }
+  const spin = (vx >= 0 ? 1 : -1) * 900; // deg/s
+  let px = x;
+  let py = y;
+  let rot = 0;
+  let last = win.performance.now();
+  const frame = now => {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    vy += g * dt;
+    px += vx * dt;
+    py += vy * dt;
+    rot += spin * dt;
+    st.transform = `translate(${px - 5}px, ${py - 11}px) rotate(${rot}deg)`;
+    const { innerWidth: w, innerHeight: h } = win;
+    if (py > h + 60 || px < -80 || px > w + 80) b.remove();
+    else win.requestAnimationFrame(frame);
+  };
+  win.requestAnimationFrame(frame);
+}
+
 /** Which prop groups each mood shows. */
 const SHOW = {
   read: ['cw-p-paper'],
@@ -217,6 +284,7 @@ const SHOW = {
   polish: ['cw-p-sponge', 'cw-glints'],
   tinker: ['cw-p-wrench'],
   water: ['cw-p-bottle', 'cw-glugs'],
+  throw: ['cw-p-bottle'],
   wave: ['cw-p-ask'],
   canvas: ['cw-f-easel', 'cw-p-brush', 'cw-h-beret'],
 };
@@ -365,15 +433,42 @@ ${showCss}
 .cw-glint { animation: cw-blinkfx 1s steps(2) infinite; }
 .cw-gl2 { animation-delay: .33s; } .cw-gl3 { animation-delay: .66s; }
 
-/* water break: tips the bottle, eyes shut, glug glug */
-@keyframes cw-drink { 0% { transform: rotate(0); } 25%, 85% { transform: rotate(-100deg) translate(-1px, -1px); } 100% { transform: rotate(0); } }
-.m-water .cw-ar { animation: cw-drink 2.8s ease-in-out infinite; }
+/* water break (3s, once): hand to the face, cap at the mouth, tip it back as it empties.
+   The arm moves the hand in front of the face; the bottle pivots on its cap, which
+   lands at (9.6, 4.6) — where Clawd's mouth would be, just under his eyes. */
+@keyframes cw-sip { 0%, 100% { transform: none; } 14%, 86% { transform: translate(-3px, -.5px); } }
+@keyframes cw-tip {
+  0%, 100% { transform: none; }
+  14% { transform: translate(-3.5px, 8.6px) rotate(-100deg); }
+  50% { transform: translate(-3.5px, 8.6px) rotate(-122deg); }
+  86% { transform: translate(-3.5px, 8.6px) rotate(-138deg); }
+}
+.m-water .cw-ar { animation: cw-sip 3s ease-in-out forwards; }
+.m-water .cw-p-bottle { transform-origin: 16.1px -3.5px; animation: cw-tip 3s ease-in-out forwards; }
 .m-water .cw-eyes { animation: none; transform: scaleY(.15); }
-.m-water .cw-all { animation: cw-hop .4s steps(2) infinite; }
-@keyframes cw-drain { 0%, 20% { transform: scaleY(1); } 85%, 100% { transform: scaleY(3.6); } }
-.m-water .cw-water-air { transform-origin: 16px -3px; animation: cw-drain 2.8s ease-in infinite; }
-.cw-glug { animation: cw-float 1s ease-out infinite; }
-.cw-g2 { animation-delay: .33s; } .cw-g3 { animation-delay: .66s; }
+.m-water .cw-all { animation: cw-bob 1.2s ease-in-out infinite; }
+@keyframes cw-drain { 0%, 14% { transform: scaleY(1); } 86%, 100% { transform: scaleY(3.6); } }
+.m-water .cw-water-air { transform-origin: 16px -3px; animation: cw-drain 3s ease-in forwards; }
+.cw-glug { animation: cw-float .9s ease-out infinite; animation-delay: .5s; }
+.cw-g2 { animation-delay: .8s; } .cw-g3 { animation-delay: 1.1s; }
+
+/* tossing the empty bottle: wind up and fling (the flying bottle is drawn separately) */
+@keyframes cw-throw { 0% { transform: rotate(35deg); } 60% { transform: rotate(35deg); } 100% { transform: rotate(-150deg); } }
+.m-throw .cw-ar { animation: cw-throw .45s cubic-bezier(.5, 0, .9, .4) forwards; }
+.m-throw .cw-water-air { transform-origin: 16px -3px; transform: scaleY(3.6); }
+.m-throw .cw-look { animation: none; transform: translate(1px, -1px); }
+
+/* tickled: giggles and wiggles */
+@keyframes cw-giggle { 0%, 100% { transform: rotate(-7deg); } 50% { transform: rotate(7deg) translateY(-.5px); } }
+.cw-tickle .cw-all { animation: cw-giggle .14s infinite !important; }
+.cw-tickle .cw-eyes { animation: none !important; transform: scaleY(.3) !important; }
+.cw-tickle .cw-arm { animation: cw-wave .2s steps(2) infinite !important; }
+.cw-tickle .cw-heart { display: inline; animation: cw-float 1s ease-out infinite; }
+.cw-tickle .cw-hh2 { animation-delay: .3s; } .cw-tickle .cw-hh3 { animation-delay: .6s; }
+
+/* noticed the cursor: a little start */
+@keyframes cw-start { 0%, 100% { transform: translateY(0); } 40% { transform: translateY(-2px) scale(1.04, .97); } }
+.cw-notice .cw-all { animation: cw-start .35s ease-out 1; }
 
 /* needs the user: waves a sign, taps a foot */
 @keyframes cw-waggle { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg); } }

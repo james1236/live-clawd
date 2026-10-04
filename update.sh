@@ -61,4 +61,3 @@ cp "$XPI" "$OUT"
 echo
 echo "Signed XPI: $OUT"
 echo "Install it over the top: drag it into Firefox (about:addons keeps your scripts)."
-(cd /mnt/c && explorer.exe "$(wslpath -w "$WIN_DIR")") || true

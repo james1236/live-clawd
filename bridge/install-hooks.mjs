@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const EVENTS = ['UserPromptSubmit', 'PreToolUse', 'Notification', 'Stop', 'SessionEnd'];
+const EVENTS = ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Notification', 'Stop', 'SessionEnd'];
 const MARK = 'live-hook.sh';
 const hookPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'live-hook.sh');
 const settingsPath = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'settings.json');
@@ -29,7 +29,7 @@ for (const ev of EVENTS) {
   const groups = (hooks[ev] || []).filter(g => !isOurs(g));
   if (!remove) {
     const group = { hooks: [{ type: 'command', command: hookPath, async: true, timeout: 5 }] };
-    if (ev === 'PreToolUse') group.matcher = '*';
+    if (ev === 'PreToolUse' || ev === 'PostToolUse') group.matcher = '*';
     groups.push(group);
   }
   if (groups.length) hooks[ev] = groups;
