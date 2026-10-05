@@ -113,6 +113,7 @@ const SOUNDS = {
   scribble: () => [0, 0.07, 0.16].forEach(at => noise(0.05, { vol: 0.1, freq: rnd(3000, 4200), q: 4, at })),
   rustle: () => noise(0.25, { vol: 0.12, freq: 1800, to: 1100, q: 1.5 }),
   dink: () => { tone(2350, 0.12, { type: 'sine', vol: 0.3, to: 2250 }); tone(3520, 0.08, { type: 'sine', vol: 0.12 }); tone(5100, 0.05, { type: 'sine', vol: 0.05 }); },
+  fork: () => { tone(260, 0.55, { type: 'triangle', vol: 0.18, to: 780, vibrato: 14 }); noise(0.3, { vol: 0.06, freq: 1200, to: 3000, at: 0.3 }); },
   click: () => tone(rnd(1900, 2200), 0.02, { type: 'square', vol: 0.05 }),
   yes: () => { tone(523, 0.08, { type: 'square', vol: 0.14 }); tone(784, 0.08, { type: 'square', vol: 0.14, at: 0.09 }); tone(1047, 0.22, { type: 'square', vol: 0.14, at: 0.18 }); },
   facepalm: () => { noise(0.06, { vol: 0.3, freq: 900, q: 1 }); tone(330, 0.5, { type: 'triangle', vol: 0.18, to: 196, at: 0.12 }); },

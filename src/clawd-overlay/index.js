@@ -36,6 +36,7 @@ import { ACTION_SOUNDS } from '@/common/clawd-sound';
 function install() {
   const SCALE = 1.5; // everything on the page, relative to the original 96px Clawd
   const SPRITE_W = 96 * SCALE; // px
+  const LABEL_SCALE = 1.25; // his caption, a little less than the rest
   const UNIT = SPRITE_W / VIEWBOX.w; // px per Clawd pixel
   const SPRITE_H = Math.round(UNIT * VIEWBOX.h);
   const FOOT_X = (8 - VIEWBOX.x) * UNIT; // Clawd's centre, from sprite's left
@@ -43,7 +44,7 @@ function install() {
   const HAND = { x: 6 * UNIT, y: 5 * UNIT }; // his working hand, relative to his feet
   const SPEED = 420; // px/s walking
   const RUN = 900; // px/s on long trips
-  const BELOW = 22 * SCALE; // room under his feet for the name tag
+  const BELOW = 16 * SCALE; // room under his feet (the babies beside him have name tags)
   const NEAR = 190; // px: eyes follow the cursor within this
   const GUESS_MS = 2200; // how long a guessed action shows
   const HOLD_MS = 10 * 60000; // a held action (tool still running) gives up after this
@@ -79,8 +80,9 @@ function install() {
 .turn.flip .cw-sign-text { transform: scaleX(-1); transform-origin: 16.7px 0; } /* keep signs readable */
 .hit { position: absolute; left: ${(3 - VIEWBOX.x) * UNIT}px; top: ${(0 - VIEWBOX.y) * UNIT}px;
   width: ${10 * UNIT}px; height: ${10 * UNIT}px; pointer-events: auto; cursor: pointer; }
-.label { position: absolute; left: 50%; bottom: calc(100% + 2px); transform: translateX(-50%); white-space: nowrap;
-  max-width: ${280 * SCALE}px; overflow: hidden; text-overflow: ellipsis; padding: ${3 * SCALE}px ${9 * SCALE}px; border-radius: ${10 * SCALE}px;
+.label { position: absolute; left: 50%; bottom: calc(100% + 2px); transform: translate(-50%, 67%); white-space: nowrap;
+  font-size: ${12 * LABEL_SCALE}px; max-width: ${280 * LABEL_SCALE}px; overflow: hidden; text-overflow: ellipsis;
+  padding: ${3 * LABEL_SCALE}px ${9 * LABEL_SCALE}px; border-radius: ${10 * LABEL_SCALE}px;
   background: #1f1e1d; color: #faf9f5; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
 .label:empty { display: none; }
 .tag { position: absolute; left: 50%; top: calc(100% + 1px); transform: translateX(-50%); white-space: nowrap;
@@ -283,7 +285,7 @@ ${CLAWD_CSS}`;
         hl: box, // effects() animates this one
         label: el('div', 'label', root),
         tagEl: el('div', 'tag', root),
-        queue: [], cur: null, ghosts: [], helpers: new Map(),
+        queue: [], cur: null, ghosts: [], helpers: new Map(), priority: [],
         pos: null, mood: 'idle', extra: '', idleMood: 'idle', glowRect: null, boxRect: null,
         leaving: false, endAfterQueue: null, lastWork: 0,
         waterUntil: 0, nextWater: 0, throwUntil: 0,
@@ -297,7 +299,6 @@ ${CLAWD_CSS}`;
       setColor(c, msg.color || COLORS[colorIx++ % COLORS.length]);
     }
     if (msg.color) setColor(c, msg.color);
-    if (msg.tag != null) c.tagEl.textContent = msg.tag;
     if (msg.live) c.live = true; // a dev page: Live Clawd gets sad when it breaks
     return c;
   }
@@ -436,7 +437,28 @@ ${CLAWD_CSS}`;
     return { x: r.left + clamp(t.x, 0, 1) * r.width, y: r.top + clamp(t.y, 0, 1) * r.height };
   }
 
-  /** Where his feet go: next to the point, or on the target's top edge, else bottom-right. */
+  /**
+   * Where his feet go next to a target without standing in its way: to its right, else its
+   * left, else below it, else above it; only if none fits, on its top edge as before.
+   */
+  function besideRect(c, r, w, h) {
+    const half = 8 * UNIT; // half his width, arms and held props included
+    const tall = 10 * UNIT; // feet to the top of his head
+    const gap = 8 * SCALE;
+    const sideY = Math.min(r.bottom, r.top + tall + 4); // beside it, level with its top part
+    const top = FOOT_Y + 26 * SCALE; // highest his feet can be (his caption needs room)
+    if (r.right + gap + 2 * half <= w) return { fx: r.right + gap + half, fy: sideY };
+    if (r.left - gap - 2 * half >= 0) return { fx: r.left - gap - half, fy: sideY };
+    const midX = r.left + Math.min(r.width / 2, 80 * SCALE) + c.offset;
+    if (r.bottom + gap + tall <= h - BELOW) return { fx: midX, fy: r.bottom + gap + tall };
+    if (r.top - gap >= top) return { fx: midX, fy: r.top - gap };
+    return {
+      fx: r.left + Math.min(56 * SCALE, r.width / 2) + c.offset,
+      fy: r.top > SPRITE_H + 24 * SCALE ? r.top + 4 : Math.min(r.bottom, r.top + SPRITE_H + 12 * SCALE),
+    };
+  }
+
+  /** Where his feet go: next to the point, or beside the target, else bottom-right. */
   function destination(c) {
     const { w, h } = vp();
     if (c.leaving && !c.cur && !c.queue.length) {
@@ -452,8 +474,7 @@ ${CLAWD_CSS}`;
       fx = pt.x - HAND.x; // hand on the spot
       fy = pt.y + HAND.y;
     } else if (r) {
-      fx = r.left + Math.min(56 * SCALE, r.width / 2) + c.offset;
-      fy = r.top > SPRITE_H + 24 * SCALE ? r.top + 4 : Math.min(r.bottom, r.top + SPRITE_H + 12 * SCALE);
+      ({ fx, fy } = besideRect(c, r, w, h));
     } else {
       fx = w - 70 * SCALE - c.offset * 2;
       fy = h - BELOW;
@@ -699,7 +720,22 @@ ${CLAWD_CSS}`;
     }
   }
 
-  /** The page is broken (or just got fixed): stand still, mope (or cheer), pause the queue. */
+  /** One frame of walking towards `dest` (sprite position); false once he's there. */
+  function walkTo(c, dest, dt) {
+    const dx = dest.x - c.pos.x;
+    const dy = dest.y - c.pos.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist <= 2) return false;
+    const k = Math.min(dist, (dist > 400 ? RUN : SPEED) * dt);
+    c.pos.x += dx / dist * k;
+    c.pos.y += dy / dist * k;
+    if (Math.abs(dx) > 2) c.turn.classList.toggle('flip', dx < 0);
+    c.stepAcc = (c.stepAcc || 0) + dt;
+    if (c.stepAcc > 0.17) { c.stepAcc = 0; sfx('step'); }
+    return true;
+  }
+
+  /** The page is broken (or just got fixed): mope (or cheer) where he is, pause the queue. */
   function moping(c, now, dt) {
     const sad = broken && c.live;
     const phew = c.phewUntil > now;
@@ -709,8 +745,13 @@ ${CLAWD_CSS}`;
     }
     if (c.cur && c.cur.endAt) c.cur.endAt += dt * 1000;
     if (sad) setLabel(c, BROKEN_SAY[broken]); // also covers a Clawd that walks on mid-breakage
-    if (sad && now > (c.nextSfx || 0)) { sfx('sniffle'); c.nextSfx = now + 2600; }
-    show(c, sad ? 'sad' : 'done', now);
+    // Off-screen (or on his way somewhere)? Walk there first, so he's seen moping.
+    if (walkTo(c, destination(c), dt)) {
+      show(c, 'walk', now);
+    } else {
+      if (sad && now > (c.nextSfx || 0)) { sfx('sniffle'); c.nextSfx = now + 2600; }
+      show(c, sad ? 'sad' : 'done', now);
+    }
     c.glow.classList.remove('on');
     c.box.classList.remove('on');
     c.root.style.transform = `translate(${Math.round(c.pos.x)}px, ${Math.round(c.pos.y)}px)`;
@@ -719,6 +760,7 @@ ${CLAWD_CSS}`;
   }
 
   function update(c, now, dt) {
+    if (c.pos && runPriority(c, now, dt)) return;
     if (c.pos && moping(c, now, dt)) return;
     const s = c.cur;
     if (!s && c.queue.length) begin(c, now);
@@ -758,8 +800,9 @@ ${CLAWD_CSS}`;
       if (dist > 0.5) { c.pos.x += dx * 0.3; c.pos.y += dy * 0.3; }
       if (c.leaving && !c.cur && !c.queue.length) { removeClawd(c); return; }
       if (cur && !cur.arrivedAt) {
-        // Face the spot he's working on.
+        // Face what he's working on (a spot: his working hand on it).
         if (stepPoint(cur, cur.rect)) c.turn.classList.remove('flip');
+        else if (cur.rect) c.turn.classList.toggle('flip', cur.rect.left + cur.rect.width / 2 < c.pos.x + FOOT_X);
         arrive(c, now);
       }
       if (cur && now > cur.endAt) finishStep(c);
@@ -935,7 +978,7 @@ ${CLAWD_CSS}`;
     const rest = restSpot(c);
     let edge = rest.x - Math.max(SPRITE_W / 2, c.tagEl.offsetWidth / 2) - BABY_ROOM; // right edge of the next baby
     for (const h of [...c.helpers.values()]) {
-      if (h.returning) continue;
+      if (h.returning || h.unborn) continue;
       const half = Math.max(MINI_W / 2, h.tag.offsetWidth / 2);
       const x = Math.max(half + 2, edge - half);
       edge = x - half - BABY_GAP;
@@ -948,40 +991,106 @@ ${CLAWD_CSS}`;
     }
   }
 
+  // --- Priority animations: forking a helper, taking its parcel. Nothing interrupts
+  // them: his step is paused and he stands still (once he's on screen) until they end.
+  const FORK_MS = 1500;
+  const FORK_BORN = 0.73; // ...the baby takes over from the sliding copy here
+
   /**
-   * A subagent: starts (a baby toddles out to its place), does something (acts out that
-   * tool call; 'idle' between them) or finishes (brings Clawd the results, then goes).
+   * Run the first priority animation, if he's on screen: `{mood, say, ms | done, start,
+   * mid + midAt, end}`. Returns false when there's none (or he still has to walk on).
+   */
+  function runPriority(c, now, dt) {
+    const p = c.priority[0];
+    if (!p) return false;
+    const feet = c.pos.x + FOOT_X;
+    if (feet < FOOT_X || feet > vp().w - FOOT_X) return false; // walk on first
+    if (!p.startedAt) {
+      p.startedAt = now;
+      c.mood = ''; // restart the mood's animation even if it's the same as the last one
+      setMood(c.svg, 'idle');
+      void c.svg.getBoundingClientRect();
+      if (p.say != null) setLabel(c, p.say);
+      if (p.start) p.start(now);
+    }
+    if (c.cur && c.cur.endAt) c.cur.endAt += dt * 1000; // paused, not skipped
+    show(c, p.mood, now);
+    c.glow.classList.remove('on');
+    c.box.classList.remove('on');
+    c.root.style.transform = `translate(${Math.round(c.pos.x)}px, ${Math.round(c.pos.y)}px)`;
+    placeLabel(c);
+    const t = now - p.startedAt;
+    if (p.mid && !p.midDone && t > p.midAt) { p.midDone = true; p.mid(now); }
+    if ((p.ms && t > p.ms) || p.done || t > (p.maxMs || 10000)) {
+      c.priority.shift();
+      setLabel(c, c.cur ? c.cur.say || '' : '');
+      if (p.end) p.end(now);
+    }
+    return true;
+  }
+
+  /**
+   * A subagent: starts (he forks a baby off himself, which toddles to its place), does
+   * something (the baby acts out that tool call; 'idle' between them) or finishes (it
+   * brings him its parcel, which he takes). Forking and taking can't be interrupted.
    */
   function helper(c, msg) {
     const key = String(msg.agentId || '');
     let h = c.helpers.get(key);
     if (msg.on === false) {
-      if (!h) return;
+      if (!h || h.returning) return;
       h.returning = true;
       layoutBabies(c); // the others close up
-      const home = feetOf(c);
-      // Back with the results: parcel overhead, then a happy hop, then gone.
-      walkMini(h, home.x - SPRITE_W / 2 + 4, home.y, 'fetch', () => {
-        setMood(h.svg, 'done');
-        sfx('chime');
-        h.timer = setTimeout(() => {
-          h.node.classList.add('gone');
-          setTimeout(() => dropBaby(c, key), 450);
-        }, 1300);
-      });
+      const p = {
+        mood: 'expect', say: 'Ooh, results!', maxMs: 9000,
+        start: () => {
+          const home = feetOf(c);
+          const side = c.turn.classList.contains('flip') ? 1 : -1; // in front of him
+          h.turn.classList.toggle('flip', side > 0);
+          walkMini(h, home.x + side * (SPRITE_W / 2 - 6 * SCALE), home.y, 'fetch', () => { p.done = true; });
+        },
+        end: () => {
+          // Hands it over: the parcel's his now.
+          setMood(h.svg, 'done');
+          sfx('chime');
+          c.priority.unshift({
+            mood: 'accept', say: 'Thanks, little one!', ms: 1600,
+            end: () => {
+              h.node.classList.add('gone');
+              setTimeout(() => dropBaby(c, key), 450);
+            },
+          });
+        },
+      };
+      c.priority.push(p);
       return;
     }
     if (!h) {
       h = makeMini(c, msg.on ? msg.label : '');
+      h.unborn = true;
+      h.node.style.visibility = 'hidden';
       c.helpers.set(key, h);
-      h.at = feetOf(c); // toddles out from Clawd
-      sfx('pop');
-      layoutBabies(c);
+      c.priority.push({
+        mood: 'fork', say: 'Forking a helper', ms: FORK_MS, midAt: FORK_MS * FORK_BORN,
+        start: () => sfx('fork'),
+        mid: () => {
+          // Takes over from the copy that slid out of him, at its spot.
+          const flip = c.turn.classList.contains('flip');
+          const feet = feetOf(c);
+          h.at = { x: feet.x + (flip ? 1 : -1) * 10 * UNIT, y: feet.y };
+          h.node.style.transitionDuration = '0s';
+          h.node.style.transform = `translate(${Math.round(h.at.x - MINI_W / 2)}px, ${Math.round(h.at.y - MINI_FEET)}px)`;
+          h.node.style.visibility = '';
+          h.unborn = false;
+          sfx('pop');
+          layoutBabies(c);
+        },
+      });
     }
     h.seen = performance.now();
     if (msg.kind) {
       h.kind = msg.kind;
-      if (!h.walking) setMood(h.svg, h.kind);
+      if (!h.walking && !h.unborn && !h.returning) setMood(h.svg, h.kind);
     }
   }
 
@@ -1000,7 +1109,7 @@ ${CLAWD_CSS}`;
   /** Every frame: babies now and then trip over; forgotten ones go home. */
   function tickBabies(c, now) {
     for (const [key, h] of [...c.helpers]) {
-      if (h.returning) continue;
+      if (h.returning || h.unborn) continue;
       if (now - h.seen > BABY_IDLE_MS) { dropBaby(c, key); continue; }
       if (!h.nextPlop) h.nextPlop = now + 6000 + Math.random() * 10000;
       if (now > h.nextPlop && !h.walking) {

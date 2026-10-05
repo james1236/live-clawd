@@ -93,6 +93,7 @@ const LEFT = [
       R(-2.3, 2.2 + i * 1.4, 0.35, 0.5, '#3a9a52', `cw-chk cw-c${i}`), R(-2, 1.75 + i * 1.4, 0.35, 0.95, '#3a9a52', `cw-chk cw-c${i}`),
     ]),
   ]),
+  G('cw-lprop cw-l-chalk', [R(0.7, 2.6, 0.7, 1.6, '#f4f1e8'), R(0.7, 2.6, 0.7, 0.4, '#d9d4c6')]),
   G('cw-lprop cw-l-notepad', [R(-2.5, 1.5, 3.5, 4.5, PAPER), R(-2.5, 1.5, 3.5, 0.7, '#e05a4f'), R(-2, 3, 2.5, 0.4, INK), R(-2, 4, 2.5, 0.4, INK)]),
 ];
 
@@ -117,6 +118,12 @@ const OVERHEAD = [
 
 /** Behind Clawd. */
 const CHALK = '#e9efe6';
+/** Forking a helper: a copy of him slides out from behind and shrinks to baby size. */
+const TWIN = G('cw-front cw-b-twin', [
+  R(4, 8, 1, 2, BODY), R(6, 8, 1, 2, BODY), R(9, 8, 1, 2, BODY), R(11, 8, 1, 2, BODY),
+  R(3, 0, 10, 8, BODY), R(1, 4, 2, 2, BODY), R(13, 4, 2, 2, BODY), R(5, 2, 1, 2, EYE), R(10, 2, 1, 2, EYE),
+]);
+
 const BOARD = G('cw-front cw-b-board', [
   R(-4.8, -6.8, 25.6, 9.1, WOOD), R(-4.5, -6.5, 25, 8.5, '#2f4f3a'),
   R(-3.6, 2.3, 0.6, 7.7, WOOD), R(19.6, 2.3, 0.6, 7.7, WOOD),
@@ -205,7 +212,7 @@ const SPRITE = ['svg', {
   'aria-hidden': 'true',
 }, [
   G('cw-all', [
-    G('cw-backs', [FRONT.find(f => f[1].class.includes('cw-f-easel')), BOARD]),
+    G('cw-backs', [FRONT.find(f => f[1].class.includes('cw-f-easel')), BOARD, TWIN]),
     G('cw-leg cw-l1', [R(4, 8, 1, 2, BODY)]),
     G('cw-leg cw-l2', [R(6, 8, 1, 2, BODY)]),
     G('cw-leg cw-l3', [R(9, 8, 1, 2, BODY)]),
@@ -320,9 +327,10 @@ export function tossBottle(doc, parent, x, y, tx, ty, at) {
     if (left > 0 && (left -= dt) <= 0) {
       const m = cursor && cursor();
       if (m && Math.hypot(m.x - px, m.y - py) < 40) {
-        // Dink! Bounces back off the cursor and starts spinning.
+        // Dink! Bounces back off the cursor and starts spinning; the cursor reels.
         aligned = false;
         if (onHit) onHit();
+        bonkCursor(doc, parent, cursor, vx, vy, scale);
         const dir = vx >= 0 ? -1 : 1;
         vx = dir * (160 + Math.random() * 120);
         vy = -Math.abs(vy) * 0.25 - 260;
@@ -340,6 +348,67 @@ export function tossBottle(doc, parent, x, y, tx, ty, at) {
     const { innerWidth: w, innerHeight: h } = win;
     if (py > h + 60 || px < -80 || px > w + 80) b.remove();
     else win.requestAnimationFrame(frame);
+  };
+  win.requestAnimationFrame(frame);
+}
+
+/**
+ * The bottle just hit the cursor: for a moment the real one hides and a stand-in arrow at
+ * its spot is knocked back the way the bottle was going, with an impact ring and a
+ * star, then springs back. Follows the mouse if it moves meanwhile.
+ */
+function bonkCursor(doc, parent, cursor, vx, vy, scale = 1) {
+  const win = doc.defaultView;
+  const NS = 'http://www.w3.org/2000/svg';
+  const hide = doc.createElement('style');
+  hide.textContent = '*, *::before, *::after { cursor: none !important; }';
+  (doc.head || doc.documentElement).appendChild(hide);
+  const box = doc.createElement('div');
+  box.style.cssText = 'position:fixed;left:0;top:0;pointer-events:none;z-index:2147483647';
+  const svg = doc.createElementNS(NS, 'svg');
+  svg.setAttribute('width', 14 * scale);
+  svg.setAttribute('height', 21 * scale);
+  svg.setAttribute('viewBox', '0 0 14 21');
+  svg.style.cssText = 'position:absolute;left:0;top:0;overflow:visible;transform-origin:0 0';
+  const arrow = doc.createElementNS(NS, 'path');
+  arrow.setAttribute('d', 'M1 1 L1 17 L5 13.4 L8 20 L10.6 18.8 L7.7 12.4 L13 12.4 Z');
+  arrow.setAttribute('fill', '#000');
+  arrow.setAttribute('stroke', '#fff');
+  arrow.setAttribute('stroke-width', '1.2');
+  arrow.setAttribute('stroke-linejoin', 'round');
+  svg.appendChild(arrow);
+  const ring = doc.createElement('div');
+  ring.style.cssText = `position:absolute;left:${-12 * scale}px;top:${-12 * scale}px;width:${24 * scale}px;height:${24 * scale}px;`
+    + 'border-radius:50%;border:2px solid rgba(58,123,213,.8);transform:scale(.3);opacity:1;'
+    + 'transition:transform .35s ease-out, opacity .35s ease-out';
+  const star = doc.createElement('div');
+  star.textContent = '✦';
+  star.style.cssText = `position:absolute;left:${4 * scale}px;top:${-16 * scale}px;font:${12 * scale}px sans-serif;color:#f2b632;`
+    + 'transition:transform .4s ease-out, opacity .4s ease-in;opacity:1';
+  box.append(ring, svg, star);
+  parent.appendChild(box);
+  const d = Math.hypot(vx, vy) || 1;
+  const kx = vx / d * 9 * scale;
+  const ky = vy / d * 9 * scale;
+  const spin = vx >= 0 ? 24 : -24;
+  const t0 = win.performance.now();
+  const DUR = 480;
+  win.requestAnimationFrame(() => {
+    ring.style.transform = 'scale(1.6)';
+    ring.style.opacity = '0';
+    star.style.transform = `translate(${kx * 0.8}px, ${-8 * scale}px) rotate(90deg)`;
+    star.style.opacity = '0';
+  });
+  const frame = now => {
+    const t = Math.min(1, (now - t0) / DUR);
+    const m = cursor();
+    // Knocked back fast, then a damped spring home.
+    const k = t < 0.15 ? t / 0.15 : Math.exp(-(t - 0.15) * 6) * Math.cos((t - 0.15) * 14);
+    box.style.visibility = m ? '' : 'hidden'; // the mouse left the page
+    if (m) box.style.transform = `translate(${m.x}px, ${m.y}px)`;
+    svg.style.transform = `translate(${kx * k}px, ${ky * k}px) rotate(${spin * k}deg)`;
+    if (t < 1) win.requestAnimationFrame(frame);
+    else { box.remove(); hide.remove(); }
   };
   win.requestAnimationFrame(frame);
 }
@@ -375,7 +444,9 @@ const SHOW = {
   compile: ['cw-h-hardhat', 'cw-p-hammer', 'cw-f-bricks'],
   install: ['cw-f-box'],
   mail: ['cw-p-plane'],
-  ponder: ['cw-b-board'],
+  ponder: ['cw-b-board', 'cw-l-chalk'],
+  fork: ['cw-b-twin', 'cw-glints'],
+  accept: ['cw-o-parcel'],
   wait: ['cw-f-book'],
   knit: ['cw-f-knit'],
   doze: ['cw-zzz', 'cw-mouth'],
@@ -619,6 +690,31 @@ ${showCss}
 .m-ponder .cw-look { animation: none; transform: translate(1px, -1px); }
 .m-ponder .cw-chalk { opacity: 0; animation: cw-chalk 8s steps(1) infinite; }
 .m-ponder .cw-k1 { animation-delay: 1.6s; } .m-ponder .cw-k2 { animation-delay: 3.2s; } .m-ponder .cw-k3 { animation-delay: 4.8s; }
+
+/* ...writing on it with a stick of chalk */
+@keyframes cw-scribble { 0% { transform: translate(-.4px, -2.6px); } 50% { transform: translate(.4px, -2.2px); } 100% { transform: translate(-.2px, -2.4px); } }
+.m-ponder .cw-al { animation: cw-scribble .35s steps(3) infinite; }
+
+/* forking a helper: strains, and a copy of him slides out and shrinks to baby size */
+@keyframes cw-strain { 0%, 100% { transform: scale(1, 1); } 30% { transform: scale(1.08, .9); } 45% { transform: scale(.94, 1.06); } 60% { transform: scale(1, 1); } }
+@keyframes cw-split { 0%, 22% { opacity: 0; transform: none; } 30% { opacity: 1; transform: translateX(-2px); }
+  70% { opacity: 1; transform: translateX(-10px) scale(.48); } 74%, 100% { opacity: 0; transform: translateX(-10px) scale(.48); } }
+.m-fork .cw-all { animation: cw-strain 1.5s ease-in-out 1; }
+.m-fork .cw-b-twin { transform-origin: 8px 10px; animation: cw-split 1.5s ease-in-out forwards; }
+.m-fork .cw-eyes { animation: none; transform: scaleY(.3); }
+.m-fork .cw-arm { transform: translateY(-1px); }
+
+/* a helper's coming back: arms out for its parcel */
+@keyframes cw-reach { 0%, 100% { transform: translate(0, -1.5px); } 50% { transform: translate(0, -2.5px); } }
+.m-expect .cw-al { animation: cw-reach .6s ease-in-out infinite; }
+.m-expect .cw-ar { animation: cw-reach .6s ease-in-out -.3s infinite; }
+.m-expect .cw-look { animation: none; transform: translateX(-1px); }
+/* ...and takes it: parcel overhead, a happy hop, hearts */
+.m-accept .cw-arm { transform: translateY(-3px); }
+.m-accept .cw-all { animation: cw-jump .75s ease-in-out infinite; }
+.m-accept .cw-eyes { animation: none; transform: scaleY(.5); }
+.m-accept .cw-heart { display: inline; animation: cw-float 1.4s ease-out infinite; }
+.m-accept .cw-hh2 { animation-delay: .45s; } .m-accept .cw-hh3 { animation-delay: .9s; }
 
 /* a long wait: sits down with a book, or some knitting */
 .cw-leg { transform-origin: 0 10px; }

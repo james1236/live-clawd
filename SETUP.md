@@ -392,6 +392,16 @@ sprite, caption or glow that overlap the photographed spots get a hole cut in th
 it sails on past and Clawd mopes for a moment ("Aw, you dodged it…"). With no cursor it
 spins all the way.
 
+**Priority animations:** forking a subagent's baby (a copy of him slides out and shrinks)
+and taking its parcel when it comes back (arms out, then parcel overhead and hearts)
+queue in `c.priority`; while one runs his current step is paused and nothing else moves
+him (once he's on screen). **Placement:** he stands beside what he's changing (right,
+else left, else below, else above), facing it, never on it unless nothing fits; no name
+tag under the main Clawd; captions are a bit smaller than the 1.5x sprite and sit lower.
+A broken page makes him walk on screen first, then mope. At the chalkboard he writes
+with chalk. A bottle that hits the cursor knocks a stand-in arrow back for half a second
+(the real cursor hides meanwhile).
+
 > **Gotcha:** the build transpiles `for…of` in loose mode (index loop over `.length`), so
 > never iterate a Map/Set iterator directly: write `for (const c of [...clawds.values()])`.
 > A bare `clawds.values()` loop silently runs zero times (this was the sad-caption bug;
