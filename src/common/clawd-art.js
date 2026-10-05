@@ -285,10 +285,10 @@ export const eyeOffset = width => ({ x: (8 - VIEWBOX.x) * width / VIEWBOX.w, y: 
  * `parent` — and let it fly on until it falls off the screen. Aimed at the cursor
  * (`at` given), it flies straight; if `cursor()` is still there when it arrives it
  * bonks off it (`onHit()`: the dink) and tumbles away spinning, else it sails on past
- * (`onMiss()`). Aimed at nothing, it spins all the way.
+ * (`onMiss()`). Aimed at nothing, it spins all the way. `at.scale` sizes the bottle.
  */
 export function tossBottle(doc, parent, x, y, tx, ty, at) {
-  const { cursor, onHit, onMiss } = at || {};
+  const { cursor, onHit, onMiss, scale = 1 } = at || {};
   const win = doc.defaultView;
   const b = doc.createElement('div');
   const st = b.style;
@@ -336,7 +336,7 @@ export function tossBottle(doc, parent, x, y, tx, ty, at) {
     py += vy * dt;
     if (aligned) rot = Math.atan2(vy, vx) * 180 / Math.PI + 90;
     rot += spin * dt;
-    st.transform = `translate(${px - 5}px, ${py - 11}px) rotate(${rot}deg)`;
+    st.transform = `translate(${px - 5}px, ${py - 11}px) rotate(${rot}deg)${scale !== 1 ? ` scale(${scale})` : ''}`;
     const { innerWidth: w, innerHeight: h } = win;
     if (py > h + 60 || px < -80 || px > w + 80) b.remove();
     else win.requestAnimationFrame(frame);

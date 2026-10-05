@@ -34,7 +34,8 @@ import { DODGED, MOOD_LABEL, TASK_RESULT, plainSay } from '@/common/clawd-action
 import { ACTION_SOUNDS } from '@/common/clawd-sound';
 
 function install() {
-  const SPRITE_W = 96; // px
+  const SCALE = 1.5; // everything on the page, relative to the original 96px Clawd
+  const SPRITE_W = 96 * SCALE; // px
   const UNIT = SPRITE_W / VIEWBOX.w; // px per Clawd pixel
   const SPRITE_H = Math.round(UNIT * VIEWBOX.h);
   const FOOT_X = (8 - VIEWBOX.x) * UNIT; // Clawd's centre, from sprite's left
@@ -42,7 +43,7 @@ function install() {
   const HAND = { x: 6 * UNIT, y: 5 * UNIT }; // his working hand, relative to his feet
   const SPEED = 420; // px/s walking
   const RUN = 900; // px/s on long trips
-  const BELOW = 22; // room under his feet for the name tag
+  const BELOW = 22 * SCALE; // room under his feet for the name tag
   const NEAR = 190; // px: eyes follow the cursor within this
   const GUESS_MS = 2200; // how long a guessed action shows
   const HOLD_MS = 10 * 60000; // a held action (tool still running) gives up after this
@@ -50,15 +51,15 @@ function install() {
   const DOZE_AFTER = 180000; // ...and nods off after this
   const PONDER_AFTER = 12000; // thinking this long (or idle between tools): the chalkboard
   const REACT_MS = 1800; // cheering or facepalming at a task's result
-  const MINI_W = 46; // px: a helper Clawd
-  const MINI_SPEED = 260; // px/s
+  const MINI_W = 46 * SCALE; // px: a helper Clawd
+  const MINI_SPEED = 260 * SCALE; // px/s
   const EYES = eyeOffset(SPRITE_W);
   const TICKLES = ['Hehe!', 'Hahaha, stop it!', 'I’m trying to work here!', 'OK OK, you win!'];
 
   const STYLE = `
 :host { all: initial; }
 * { box-sizing: border-box; }
-.layer { position: fixed; inset: 0; pointer-events: none; overflow: hidden; font: 12px/1.3 system-ui, sans-serif;
+.layer { position: fixed; inset: 0; pointer-events: none; overflow: hidden; font: ${12 * SCALE}px/1.3 system-ui, sans-serif;
   --clawd: #d97757; --clawd-eye: #1f1e1d; --accent: #d97757; }
 /* the thing he's working on: a soft glow that glides between targets */
 .glow { position: absolute; left: 0; top: 0; border-radius: 12px; opacity: 0; transition: opacity .35s;
@@ -79,26 +80,24 @@ function install() {
 .hit { position: absolute; left: ${(3 - VIEWBOX.x) * UNIT}px; top: ${(0 - VIEWBOX.y) * UNIT}px;
   width: ${10 * UNIT}px; height: ${10 * UNIT}px; pointer-events: auto; cursor: pointer; }
 .label { position: absolute; left: 50%; bottom: calc(100% + 2px); transform: translateX(-50%); white-space: nowrap;
-  max-width: 280px; overflow: hidden; text-overflow: ellipsis; padding: 3px 9px; border-radius: 10px;
+  max-width: ${280 * SCALE}px; overflow: hidden; text-overflow: ellipsis; padding: ${3 * SCALE}px ${9 * SCALE}px; border-radius: ${10 * SCALE}px;
   background: #1f1e1d; color: #faf9f5; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
 .label:empty { display: none; }
 .tag { position: absolute; left: 50%; top: calc(100% + 1px); transform: translateX(-50%); white-space: nowrap;
-  font-size: 10px; font-weight: 600; color: #faf9f5; background: var(--clawd); border-radius: 7px; padding: 0 6px; opacity: .92; }
+  font-size: ${10 * SCALE}px; font-weight: 600; color: #faf9f5; background: var(--clawd); border-radius: ${7 * SCALE}px; padding: 0 ${6 * SCALE}px; opacity: .92; }
 .tag:empty { display: none; }
 .mini { position: absolute; left: 0; top: 0; width: ${MINI_W}px; height: ${Math.round(MINI_W * VIEWBOX.h / VIEWBOX.w)}px;
   transition-property: transform, opacity; transition-timing-function: linear; will-change: transform;
   filter: drop-shadow(0 1px 1px rgba(0,0,0,.25)); }
 .mini.gone { opacity: 0; transition-duration: .4s !important; }
-/* babies: toddle, wobble, a lazy eye, and the odd tumble */
-@keyframes toddle { 0%, 100% { transform: rotate(-6deg); } 50% { transform: rotate(6deg) translateY(-1px); } }
-@keyframes plop { 0% { transform: none; } 25% { transform: rotate(-75deg) translate(-4px, 6px); }
-  70% { transform: rotate(-75deg) translate(-4px, 6px); } 100% { transform: none; } }
+/* babies: toddle, wobble, and the odd tumble */
+@keyframes toddle { 0%, 100% { transform: rotate(-6deg); } 50% { transform: rotate(6deg) translateY(-${SCALE}px); } }
+@keyframes plop { 0% { transform: none; } 25% { transform: rotate(-75deg) translate(-${4 * SCALE}px, ${6 * SCALE}px); }
+  70% { transform: rotate(-75deg) translate(-${4 * SCALE}px, ${6 * SCALE}px); } 100% { transform: none; } }
 .derp { position: absolute; inset: 0; transform-origin: 50% 85%; animation: toddle 1.3s ease-in-out infinite; }
 .derp.plop { animation: plop 1.4s cubic-bezier(.3, 1.4, .5, 1) 1; }
-.mini .cw-eyes rect:first-child { transform: translate(-.3px, .7px); }
-.mini .cw-eyes rect:last-child { transform: scale(1.3); transform-origin: 10.5px 3px; }
 .minitag { position: absolute; left: 50%; top: calc(100% + 1px); transform: translateX(-50%); white-space: nowrap;
-  font-size: 9px; font-weight: 600; color: #faf9f5; background: var(--clawd); border-radius: 6px; padding: 0 5px; opacity: .9; }
+  font-size: ${9 * SCALE}px; font-weight: 600; color: #faf9f5; background: var(--clawd); border-radius: ${6 * SCALE}px; padding: 0 ${5 * SCALE}px; opacity: .9; }
 .minitag:empty { display: none; }
 
 /* effects inside the highlight box */
@@ -289,7 +288,7 @@ ${CLAWD_CSS}`;
         leaving: false, endAfterQueue: null, lastWork: 0,
         waterUntil: 0, nextWater: 0, throwUntil: 0,
         tickleUntil: 0, tickles: 0, lastTickle: 0, noticeUntil: 0, near: false,
-        offset: (clawds.size % 3) * 44, // later Clawds stand a little to the side
+        offset: (clawds.size % 3) * 44 * SCALE, // later Clawds stand a little to the side
       };
       const stop = e => { e.stopPropagation(); e.preventDefault(); };
       hit.addEventListener('mousedown', stop);
@@ -453,15 +452,15 @@ ${CLAWD_CSS}`;
       fx = pt.x - HAND.x; // hand on the spot
       fy = pt.y + HAND.y;
     } else if (r) {
-      fx = r.left + Math.min(56, r.width / 2) + c.offset;
-      fy = r.top > SPRITE_H + 24 ? r.top + 4 : Math.min(r.bottom, r.top + SPRITE_H + 12);
+      fx = r.left + Math.min(56 * SCALE, r.width / 2) + c.offset;
+      fy = r.top > SPRITE_H + 24 * SCALE ? r.top + 4 : Math.min(r.bottom, r.top + SPRITE_H + 12 * SCALE);
     } else {
-      fx = w - 70 - c.offset * 2;
+      fx = w - 70 * SCALE - c.offset * 2;
       fy = h - BELOW;
     }
     // Keep all of him on screen: caption above, name tag below.
     fx = clamp(fx, FOOT_X + 4, w - (SPRITE_W - FOOT_X) - 4);
-    fy = clamp(fy, FOOT_Y + 26, h - BELOW);
+    fy = clamp(fy, FOOT_Y + 26 * SCALE, h - BELOW);
     return { x: fx - FOOT_X, y: fy - FOOT_Y };
   }
 
@@ -486,7 +485,7 @@ ${CLAWD_CSS}`;
       return;
     }
     const pt = stepPoint(step, r);
-    let g = pt ? { left: pt.x - 26, top: pt.y - 26, width: 52, height: 52 }
+    let g = pt ? { left: pt.x - 26 * SCALE, top: pt.y - 26 * SCALE, width: 52 * SCALE, height: 52 * SCALE }
       : { left: r.left - 6, top: r.top - 6, width: r.width + 12, height: r.height + 12 };
     g = { left: clamp(g.left, 2, w - 10), top: clamp(g.top, 2, h - 10), width: Math.min(g.width, w - 4), height: Math.min(g.height, h - 4) };
     c.glowRect = lerpRect(c.glowRect, g, 0.22);
@@ -803,6 +802,7 @@ ${CLAWD_CSS}`;
       const hand = handPos(c);
       const aim = mouse || { x: hand.x + hand.dir * 260, y: hand.y - 220 };
       tossBottle(document, layer, hand.x, hand.y, aim.x, aim.y, mouse && {
+        scale: SCALE,
         cursor: () => mouse,
         onHit: () => sfx('dink'),
         onMiss: () => {
@@ -879,7 +879,8 @@ ${CLAWD_CSS}`;
   }
 
   // --- Subagents: baby Clawds lined up left of where he rests, acting out their tasks --
-  const BABY_GAP = 8; // px between babies
+  const BABY_GAP = 10 * SCALE; // px between babies
+  const BABY_ROOM = 24 * SCALE; // px between Clawd (or his name tag) and the first baby
   const BABY_IDLE_MS = 15 * 60000; // a baby nobody's heard from in this long goes home
 
   /** A baby Clawd of the same colour, for a subagent. */
@@ -890,9 +891,9 @@ ${CLAWD_CSS}`;
     const derp = el('div', 'derp', turn); // toddling, wobbles and tumbles
     const svg = clawdSpriteNode(document, MINI_W);
     derp.appendChild(svg);
-    el('div', 'minitag', node, label || '');
+    const tag = el('div', 'minitag', node, label || '');
     return {
-      node, turn, derp, svg, kind: 'idle', walking: false, nextPlop: 0, seen: performance.now(),
+      node, turn, derp, svg, tag, kind: 'idle', walking: false, nextPlop: 0, seen: performance.now(),
     };
   }
 
@@ -919,7 +920,7 @@ ${CLAWD_CSS}`;
   /** Where Clawd's feet go when he's resting (no target): bottom right. */
   function restSpot(c) {
     const { w, h } = vp();
-    return { x: clamp(w - 70 - c.offset * 2, FOOT_X + 4, w - (SPRITE_W - FOOT_X) - 4), y: h - BELOW };
+    return { x: clamp(w - 70 * SCALE - c.offset * 2, FOOT_X + 4, w - (SPRITE_W - FOOT_X) - 4), y: h - BELOW };
   }
 
   /** Where Clawd's feet are now (or will be). */
@@ -929,13 +930,15 @@ ${CLAWD_CSS}`;
     return { x: d.x + FOOT_X, y: d.y + FOOT_Y };
   }
 
-  /** Line the babies up leftwards from Clawd's resting spot, facing him. */
+  /** Line the babies up leftwards from Clawd's resting spot, facing him, clear of him and his name tag. */
   function layoutBabies(c) {
     const rest = restSpot(c);
-    let i = 0;
+    let edge = rest.x - Math.max(SPRITE_W / 2, c.tagEl.offsetWidth / 2) - BABY_ROOM; // right edge of the next baby
     for (const h of [...c.helpers.values()]) {
       if (h.returning) continue;
-      const x = Math.max(MINI_W / 2 + 2, rest.x - SPRITE_W / 2 - MINI_W / 2 - 4 - i++ * (MINI_W + BABY_GAP));
+      const half = Math.max(MINI_W / 2, h.tag.offsetWidth / 2);
+      const x = Math.max(half + 2, edge - half);
+      edge = x - half - BABY_GAP;
       if (h.slot && h.slot.x === x && h.slot.y === rest.y) continue;
       h.slot = { x, y: rest.y };
       walkMini(h, x, rest.y, 'walk', () => {
