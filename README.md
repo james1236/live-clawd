@@ -5,8 +5,6 @@ it's doing, right on the web app you're building.
 
 ![Clawd painting a navbar, restyling a page, running tests and forking a helper](docs/demo.gif)
 
-<sub>Demo page: Bootstrap's 2017 [Album example](https://getbootstrap.com/docs/4.0/examples/album/) (MIT).</sub>
-
 ## Install
 
 1. In Claude Code:
@@ -16,8 +14,11 @@ it's doing, right on the web app you're building.
    /plugin install clawd@live-clawd
    ```
 
-2. Install the browser extension: the signed `.xpi` for Firefox, or the `chrome` folder for
-   Chrome (`chrome://extensions` → Developer mode → Load unpacked).
+2. Install the browser extension:
+   - **Firefox:** open [live-clawd.xpi](https://github.com/james1236/live-clawd/raw/main/release/live-clawd.xpi) (signed) and confirm.
+   - **Chrome:** download [live-clawd-chrome.zip](https://github.com/james1236/live-clawd/raw/main/release/live-clawd-chrome.zip) and unzip it,
+     then in `chrome://extensions` turn on Developer mode, click Load unpacked and pick the
+     `live-clawd-chrome` folder.
 
 Needs Node.js and git. Works on Linux, macOS and WSL.
 
@@ -29,6 +30,18 @@ Code in that project. Clawd shows up while Claude works.
 The toolbar icon is awake on pages Clawd is working on and asleep elsewhere. Its popup turns
 him off, mutes a site, toggles sounds, and (optionally) lets him hide each change until he
 reveals it.
+
+## How it works
+
+The plugin adds two things to Claude Code. **Hooks** tell Clawd what Claude is doing (which
+tool, how it ended, subagents) and cost no tokens. A **`clawd` tool** lets Claude itself say
+where a UI change shows up and how Clawd should act it out: Claude adds one short call next
+to each visible edit, which costs roughly a hundred output tokens each time, plus a few
+hundred tokens of instructions in the system prompt.
+
+Both go to a small local server that your Claude Code session starts on `127.0.0.1`; the
+extension connects to it, finds the dev page for that project among your localhost tabs, and
+plays the animation there.
 
 ## If he doesn't show up
 

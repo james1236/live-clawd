@@ -178,7 +178,7 @@ ${CLAWD_CSS}`;
     blank: 'Oh no… the page went blank',
     error: 'Oh no… something threw an error',
   };
-  let lastPageError = 0;
+  let lastPageError = -Infinity; // none yet (performance.now() starts at 0 when the page loads)
   let rootSeen = false;
   let broken = '';
   let brokenCheckAt = 0;
