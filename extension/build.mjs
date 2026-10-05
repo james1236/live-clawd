@@ -31,7 +31,7 @@ const manifests = {
     icons: ICONS,
     author: AUTHOR,
     developer: { name: AUTHOR },
-    browser_specific_settings: { gecko: { id: 'live-clawd@james.local', strict_min_version: '115.0' } },
+    browser_specific_settings: { gecko: { id: 'live-clawd@popup-games', strict_min_version: '115.0' } },
     background: { scripts: ['background.js'], persistent: true },
     browser_action: { default_popup: 'popup.html', default_icon: ASLEEP, default_title: NAME },
     permissions: ['storage', 'scripting', ...LOCAL],

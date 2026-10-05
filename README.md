@@ -1,8 +1,11 @@
 # Live Clawd
 
-A pixel mascot who acts out what Claude Code is doing, right on the web app you're building.
+A pixel mascot who connects to the Claude Code you already have running and acts out what
+it's doing, right on the web app you're building.
 
-![Clawd painting a header, polishing cards, running tests and celebrating](docs/demo.gif)
+![Clawd painting a navbar, restyling a page, running tests and forking a helper](docs/demo.gif)
+
+<sub>Demo page: Bootstrap's 2017 [Album example](https://getbootstrap.com/docs/4.0/examples/album/) (MIT).</sub>
 
 ## Install
 

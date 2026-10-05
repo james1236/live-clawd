@@ -110,8 +110,12 @@ function devPorts(root, cfg) {
       try { ports.add(+new URL(u).port || 80); } catch { /* bad url */ }
     }
   }
-  for (const l of listeners()) {
-    if ((l.cwd && inside(l.cwd, root)) || l.cmd.includes(`${root}/`)) ports.add(l.port);
+  // A session started in your home folder (or /) isn't "a project": it would claim every
+  // dev server you run. Those only get what the config lists.
+  if (![HOME, path.dirname(HOME), '/'].includes(root)) {
+    for (const l of listeners()) {
+      if ((l.cwd && inside(l.cwd, root)) || l.cmd.includes(`${root}/`)) ports.add(l.port);
+    }
   }
   ports.delete(BRIDGE_PORT); // the bridge itself is no dev server
   return [...ports];
