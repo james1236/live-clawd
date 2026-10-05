@@ -2,9 +2,9 @@
 /*
  * Replays a recorded Live Clawd session (see clawd-record.mjs) with zero Claude usage.
  *
- *   node bridge/clawd-replay.mjs replays/<name> [--dry-run] [--duration 120] [--speed 2]
- *        [--max-gap 3] [--max-tool 15] [--clawd-room 3] [--hooks installed|all] [--project <dir>]
- *        [--restore] [--force]
+ *   node bridge/clawd-replay.mjs replays/<name> [--dry-run] [--duration 180] [--speed 2]
+ *        [--max-gap 1.5] [--max-tool 12] [--long-tool 22] [--long-gap 25 [--long-gaps 2]]
+ *        [--compact 8] [--clawd-room 3] [--hooks installed|all] [--project <dir>] [--restore] [--force]
  *
  * The bridge and the extension can't tell a replay from a live session, because it feeds
  * them exactly what a live one does:
@@ -14,18 +14,24 @@
  *    the bridge's git-based diff (scanChanges) sees the same edits;
  *  - a transcript that grows as playback goes, which the bridge reads for narration.
  *
- * Hook events are rebuilt from the recorded transcript: UserPromptSubmit, PreToolUse /
- * PostToolUse (each at its real time, so a long tool keeps its real duration), Stop,
- * plus - with --hooks all - events the live setup doesn't send yet: SubagentStart /
- * SubagentStop, PreCompact (a real compact boundary, or a recorded "marker"), and
- * BackgroundTaskStop (synthetic: a run_in_background command finishing, with its exit
- * code). PostToolUse carries tool_response {is_error, exit_code} for pass/fail reactions.
+ * Hook events are rebuilt from the recorded transcript, shaped as Claude Code sends them:
+ * UserPromptSubmit, PreToolUse, PostToolUse / PostToolUseFailure (each at its real time, so
+ * a long tool keeps its real duration), SubagentStart / SubagentStop (paired by agent_id; a
+ * background agent stops at its task notification), PreCompact / PostCompact (a real compact
+ * boundary, or a recorded "marker" - moved to just after the tool that wrote it), and Stop.
+ * By default only the events ~/.claude/settings.json runs live-hook.sh for are sent, as live;
+ * --hooks all sends every one.
  *
  * Timing: --max-gap caps idle gaps (Claude thinking, the user reading). A gap while a tool
  * is running is never capped that way - its duration is what timers and dozing show - but
  * --max-tool shrinks a long tool to that many seconds, scaling everything inside it, so it
  * stays the longest stretch without dominating. --speed then divides everything, or
- * --duration picks the speed that makes the whole replay that many seconds. However fast it
+ * --duration picks the speed that makes the whole replay that many seconds. Two floors keep
+ * the overlay's slow animations reachable: a tool that really ran for at least --long-tool
+ * seconds plays for at least that long (it sits down with a book or knitting at 20s; a
+ * subagent's trip gets the same), a compaction plays for at least --compact (8s), and
+ * the --long-gaps longest mid-turn pauses play for --long-gap seconds (water break and
+ * bottle toss after 9-18s between steps, the chalkboard after 12s). However fast it
  * plays, a clawd call is never followed sooner than --clawd-room seconds (default 3) per
  * step it had - the overlay plays every step in full, ~2.6s plus walking, so a squeezed
  * replay would otherwise stack Clawd's animations up. Without options, timing is exactly
@@ -45,7 +51,7 @@ const flag = name => args.includes(`--${name}`);
 const expand = p => p && path.resolve(p.replace(/^~(?=$|\/)/, os.homedir()));
 const REC = expand(args.find(a => !a.startsWith('--') && !args[args.indexOf(a) - 1]?.startsWith('--')));
 if (!REC || !fs.existsSync(path.join(REC, 'meta.json'))) {
-  console.error('usage: clawd-replay.mjs <recording dir> [--dry-run] [--speed N] [--max-gap S] [--hooks installed|all] [--project dir] [--restore] [--force]');
+  console.error('usage: clawd-replay.mjs <recording dir> [options] - see the header comment');
   process.exit(2);
 }
 const MAX_GAP = opt('max-gap') != null ? +opt('max-gap') * 1000 : Infinity;
@@ -53,6 +59,10 @@ const MAX_TOOL = opt('max-tool') != null ? +opt('max-tool') * 1000 : Infinity;
 const DURATION = opt('duration') != null ? +opt('duration') * 1000 : null;
 let SPEED = +opt('speed', 1);
 const CLAWD_ROOM = +opt('clawd-room', 3) * 1000;
+const LONG_TOOL = opt('long-tool') != null ? +opt('long-tool') * 1000 : null;
+const LONG_GAP = opt('long-gap') != null ? +opt('long-gap') * 1000 : null;
+const LONG_GAPS = +opt('long-gaps', 2);
+const COMPACT_MS = +opt('compact', 8) * 1000;
 const HOOKS = opt('hooks', 'installed');
 const DRY = flag('dry-run');
 
@@ -62,7 +72,16 @@ const LIVE_DIR = path.join(os.homedir(), '.claudemonkey', 'live');
 const SPOOL_DIR = path.join(LIVE_DIR, 'spool');
 const ACK_DIR = path.join(LIVE_DIR, 'acks');
 const ACK_WAIT_MS = 1200;
-const INSTALLED = new Set(['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Notification', 'Stop', 'SessionEnd']);
+/** Hook events the live setup really sends: those whose settings.json hooks run live-hook.sh. */
+function installedHooks() {
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf8'));
+    const evs = Object.entries(s.hooks || {}).filter(([, v]) => JSON.stringify(v).includes('live-hook.sh')).map(([k]) => k);
+    if (evs.length) return new Set(evs);
+  } catch { /* fall back */ }
+  return new Set(['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Notification', 'Stop', 'SessionEnd']);
+}
+const INSTALLED = installedHooks();
 const readJsonl = f => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)) : []);
 
 // --- What the recording holds ---
@@ -82,11 +101,20 @@ const contentOf = o => (Array.isArray(o.message?.content) ? o.message.content : 
 const textOf = o => (typeof o.message?.content === 'string' ? o.message.content
   : contentOf(o).filter(c => c.type === 'text').map(c => c.text).join('\n'));
 
-/** Build the timeline: [{t, type, ...}] in original wall-clock ms. */
+const OPENS = new Set(['PreToolUse', 'SubagentStart', 'PreCompact']);
+const CLOSES = new Set(['PostToolUse', 'PostToolUseFailure', 'SubagentStop', 'PostCompact']);
+/** Which span (a held tool, a subagent's trip, a compaction) an opening/closing event belongs to. */
+const spanKey = e => (/ToolUse/.test(e.event) ? `tool:${e.toolId}`
+  : /Subagent/.test(e.event) ? `agent:${e.extra.agent_id}` : /Compact/.test(e.event) ? 'compact' : null);
+
+/**
+ * Build the timeline: [{t, type, ...}] in original wall-clock ms, with every hook event
+ * shaped as Claude Code sends it (and live-hook.sh spools it).
+ */
 function buildTimeline() {
   const tl = [];
-  const tools = new Map(); // tool_use_id -> {name, input, t}
-  const startedBg = new Set();
+  const tools = new Map(); // tool_use_id -> {name, input, t, start (SubagentStart event)}
+  const done = new Set();
   for (const o of transcript) {
     const t = Date.parse(o.timestamp);
     if (!t) continue;
@@ -99,37 +127,46 @@ function buildTimeline() {
     if (o.type === 'system' && o.subtype === 'compact_boundary') {
       tl.push({ t, type: 'hook', event: 'PreCompact', extra: { trigger: o.compactMetadata?.trigger || 'auto', custom_instructions: '' } });
     }
+    // A background agent finishing arrives as a queued task notification, not a tool result.
     if (o.type === 'queue-operation' && o.operation === 'enqueue' && /<task-notification>/.test(o.content || '')) {
       const id = (o.content.match(/<tool-use-id>([^<]+)/) || [])[1];
       const tool = tools.get(id);
-      if (tool && !startedBg.has(`done:${id}`)) {
-        startedBg.add(`done:${id}`);
-        const exit = +((o.content.match(/exit code (\d+)/) || [])[1] ?? 0);
-        const status = (o.content.match(/<status>([^<]+)/) || [])[1] || 'completed';
-        if (tool.name === 'Agent') {
-          tl.push({ t, type: 'hook', event: 'SubagentStop', extra: { agent_type: tool.input.subagent_type || 'general-purpose', agent_id: (o.content.match(/<task-id>([^<]+)/) || [])[1] || '', stop_hook_active: false } });
-        } else {
-          tl.push({ t, type: 'hook', event: 'BackgroundTaskStop', extra: { tool_name: tool.name, tool_input: tool.input, status, exit_code: exit } });
-        }
+      if (tool && tool.start && !done.has(id)) {
+        done.add(id);
+        tl.push({ t, type: 'hook', event: 'SubagentStop', extra: { agent_id: tool.start.extra.agent_id, agent_type: tool.start.extra.agent_type, stop_hook_active: false } });
       }
     }
     for (const c of contentOf(o)) {
       if (o.type === 'assistant' && c.type === 'tool_use') {
-        tools.set(c.id, { name: c.name, input: c.input || {}, t });
+        const tool = { name: c.name, input: c.input || {}, t };
+        tools.set(c.id, tool);
         if (c.name === 'mcp__clawd__clawd') tl.push({ t, type: 'clawd', steps: (c.input?.steps || []).slice(0, 6), id: c.id });
         tl.push({ t, type: 'hook', event: 'PreToolUse', toolId: c.id, extra: { tool_name: c.name, tool_input: c.input || {}, tool_use_id: c.id } });
-        if (c.name === 'Agent') {
-          tl.push({ t, type: 'hook', event: 'SubagentStart', extra: { agent_type: c.input?.subagent_type || 'general-purpose' } });
+        if (c.name === 'Agent' || c.name === 'Task') {
+          tool.start = { t, type: 'hook', event: 'SubagentStart', extra: { agent_id: c.id, agent_type: c.input?.subagent_type || 'general-purpose' } };
+          tl.push(tool.start);
         }
       }
       if (o.type === 'user' && c.type === 'tool_result' && tools.has(c.tool_use_id)) {
         const tool = tools.get(c.tool_use_id);
         const out = typeof c.content === 'string' ? c.content : (Array.isArray(c.content) ? c.content.map(x => x.text || '').join('\n') : '');
-        const exit = c.is_error ? +((out.match(/Exit code (\d+)/) || [])[1] ?? 1) : 0;
-        tl.push({
-          t, type: 'hook', event: 'PostToolUse', toolId: c.tool_use_id,
-          extra: { tool_name: tool.name, tool_input: tool.input, tool_use_id: c.tool_use_id, tool_response: { is_error: !!c.is_error, exit_code: exit, output: out.slice(0, 2000) } },
-        });
+        const base = { tool_name: tool.name, tool_input: tool.input, tool_use_id: c.tool_use_id };
+        if (c.is_error) {
+          tl.push({ t, type: 'hook', event: 'PostToolUseFailure', toolId: c.tool_use_id, extra: { ...base, error: out.slice(0, 2000), is_interrupt: false } });
+        } else {
+          const response = tool.name === 'Bash' ? { stdout: out.slice(-4000), stderr: '', interrupted: false, isImage: false } : { content: out.slice(0, 2000) };
+          tl.push({ t, type: 'hook', event: 'PostToolUse', toolId: c.tool_use_id, extra: { ...base, tool_response: response } });
+        }
+        if (tool.start) {
+          // A background agent's result only says it launched (it reports back later);
+          // a foreground one's result IS its report.
+          const bgId = (out.match(/agentId: (\w+)/) || [])[1];
+          if (bgId) tool.start.extra.agent_id = bgId;
+          else if (!done.has(c.tool_use_id)) {
+            done.add(c.tool_use_id);
+            tl.push({ t, type: 'hook', event: 'SubagentStop', extra: { ...tool.start.extra, stop_hook_active: false } });
+          }
+        }
       }
     }
     if (o.type === 'assistant' && o.message?.stop_reason === 'end_turn') {
@@ -146,7 +183,20 @@ function buildTimeline() {
   for (const e of fileEvents) tl.push({ t: e.t, type: 'file', path: e.path, blob: e.blob });
   // Stable order; at equal times a clawd call goes before the hook/edit it precedes live.
   const rank = { clawd: 0, hook: 1, file: 2 };
-  tl.sort((a, b) => a.t - b.t || rank[a.type] - rank[b.type]);
+  const sort = () => tl.sort((a, b) => a.t - b.t || rank[a.type] - rank[b.type]);
+  sort();
+  // A compaction happens between tool calls, never during one: a recorded marker (written
+  // by a tool) moves to just after that tool. It lasts until the next thing happens.
+  for (const pre of tl.filter(e => e.event === 'PreCompact')) {
+    const i = tl.indexOf(pre);
+    const open = tl.slice(0, i).filter(e => e.event === 'PreToolUse' && !tl.slice(0, i).some(x => CLOSES.has(x.event) && x.toolId === e.toolId));
+    const ends = open.map(o => tl.find(x => CLOSES.has(x.event) && x.toolId === o.toolId)).filter(Boolean);
+    if (ends.length) pre.t = Math.max(...ends.map(x => x.t)) + 1;
+    sort();
+    const next = tl.find(x => x.t > pre.t && x !== pre);
+    tl.push({ t: next ? Math.max(pre.t + 500, next.t - 1) : pre.t + 3000, type: 'hook', event: 'PostCompact', extra: { trigger: pre.extra.trigger } });
+    sort();
+  }
   // Only the recorded window, not the session before the recorder started.
   const from = meta.startedAt - 1000;
   const to = Math.max(meta.stoppedAt || 0, ...fileEvents.map(e => e.t), ...recEvents.map(e => e.t)) + 1000;
@@ -154,50 +204,64 @@ function buildTimeline() {
 }
 
 /**
- * Playback offsets (ms from start). Idle gaps are capped at --max-gap; inside a running
- * tool, gaps are scaled so the tool lasts at most --max-tool; then --speed (or the speed
- * --duration implies) divides everything.
+ * Playback offsets (ms from start). Idle gaps are capped at --max-gap. Inside a span (a
+ * held tool, a subagent's trip, a compaction) gaps are scaled so the span lasts at most
+ * --max-tool. Then --speed (or the speed --duration implies) divides everything, a clawd
+ * call gets --clawd-room per step before the next event, and a tool that really ran for
+ * at least --long-tool seconds plays for at least that long.
  */
 function schedule(tl) {
-  // Each tool's real duration, from its PreToolUse to its PostToolUse.
-  const span = new Map();
+  const span = new Map(); // key -> {from, to}
   for (const e of tl) {
-    if (e.event === 'PreToolUse') span.set(e.toolId, { from: e.t });
-    if (e.event === 'PostToolUse' && span.has(e.toolId)) span.get(e.toolId).to = e.t;
+    const k = spanKey(e);
+    if (k && OPENS.has(e.event) && !span.has(k)) span.set(k, { from: e.t });
+    if (k && CLOSES.has(e.event) && span.has(k)) span.get(k).to ??= e.t;
   }
-  const running = new Map(); // toolId -> scale for gaps inside it
+  const realDur = k => { const s = span.get(k); return s && s.to != null ? s.to - s.from : 0; };
+  const running = new Map(); // key -> scale for gaps inside it
   const gaps = [];
-  let at = 0;
+  const busyIdle = []; // [index, real gap]: nothing running, mid-turn (Claude thinking)
+  let busy = false;
   let prev = tl.length ? tl[0].t : 0;
-  for (const e of tl) {
-    let gap = Math.max(0, e.t - prev);
-    if (!running.size) gap = Math.min(gap, MAX_GAP);
-    else gap *= Math.min(...running.values());
+  for (const [i, e] of tl.entries()) {
+    const real = Math.max(0, e.t - prev);
+    let gap = real;
+    if (!running.size) { gap = Math.min(gap, MAX_GAP); if (busy) busyIdle.push([i, real]); } else gap *= Math.min(...running.values());
     gaps.push(gap);
     prev = e.t;
-    if (e.event === 'PreToolUse') {
-      const s = span.get(e.toolId);
-      const d = s && s.to ? s.to - s.from : 0;
-      running.set(e.toolId, d > MAX_TOOL ? MAX_TOOL / d : 1);
-    }
-    if (e.event === 'PostToolUse') running.delete(e.toolId);
+    if (e.event === 'UserPromptSubmit') busy = true;
+    if (e.event === 'Stop') busy = false;
+    const k = spanKey(e);
+    if (k && OPENS.has(e.event)) { const d = realDur(k); running.set(k, d > MAX_TOOL ? MAX_TOOL / d : 1); }
+    if (k && CLOSES.has(e.event)) running.delete(k);
   }
-  // Apply a speed, then hold everything after a clawd call back until it has had its room.
+  // The longest mid-turn pauses play for --long-gap regardless of speed: Clawd only
+  // pours a drink (and tosses the bottle) or pulls out the chalkboard between steps.
+  const fixed = new Set(LONG_GAP ? busyIdle.sort((a, b) => b[1] - a[1]).slice(0, LONG_GAPS).map(([i]) => i) : []);
   const place = speed => {
     let t = 0;
     let free = 0;
+    const openAt = new Map();
     for (let i = 0; i < tl.length; i++) {
-      t += gaps[i] / speed;
-      if (tl[i].type === 'clawd') {
+      const e = tl[i];
+      t += fixed.has(i) ? LONG_GAP : gaps[i] / speed;
+      if (e.type === 'clawd') {
         t = Math.max(t, free);
-        free = t + CLAWD_ROOM * tl[i].steps.length;
+        free = t + CLAWD_ROOM * e.steps.length;
       }
-      tl[i].at = Math.round(t);
+      const k = spanKey(e);
+      if (k && OPENS.has(e.event)) openAt.set(k, t);
+      if (k && CLOSES.has(e.event) && openAt.has(k)) {
+        // A long tool or subagent trip keeps --long-tool; a compaction always gets --compact.
+        if (LONG_TOOL && !k.startsWith('compact') && realDur(k) >= LONG_TOOL) t = Math.max(t, openAt.get(k) + LONG_TOOL);
+        if (k === 'compact') t = Math.max(t, openAt.get(k) + COMPACT_MS);
+      }
+      e.at = Math.round(t);
     }
     return t;
   };
   if (DURATION) {
-    // Total time falls as speed rises (the clawd floor makes it non-linear): bisect.
+    // Total time falls as speed rises (the floors make it non-linear): bisect.
     let lo = 0.01;
     let hi = 1000;
     for (let i = 0; i < 60; i++) {
@@ -205,7 +269,7 @@ function schedule(tl) {
       if (place(mid) > DURATION) lo = mid; else hi = mid;
     }
     SPEED = hi;
-    if (place(hi) > DURATION * 1.02) console.warn(`can't reach ${DURATION / 1000}s: the clawd room alone needs more; lower --clawd-room`);
+    if (place(hi) > DURATION * 1.02) console.warn(`can't reach ${DURATION / 1000}s: the clawd room and long tools alone need more`);
   }
   place(SPEED);
   return tl;
@@ -217,7 +281,7 @@ function describe(e) {
   if (e.type === 'file') return `FILE   ${e.path}${e.blob ? '' : ' (deleted)'}`;
   const x = e.extra || {};
   const tool = x.tool_name ? ` ${x.tool_name}${x.tool_input?.command ? `: ${String(x.tool_input.command).split('\n')[0].slice(0, 60)}` : ''}` : '';
-  const res = e.event === 'PostToolUse' && x.tool_response?.is_error ? ` [exit ${x.tool_response.exit_code}]` : '';
+  const res = e.event === 'PostToolUseFailure' ? ` [${(String(x.error).match(/Exit code \d+/) || ['failed'])[0]}]` : '';
   return `HOOK   ${e.event}${tool}${res}${e.event === 'UserPromptSubmit' ? `: ${x.prompt.replace(/\s+/g, ' ').slice(0, 60)}` : ''}${e.marker ? ' (recorded marker)' : ''}`;
 }
 
@@ -256,7 +320,7 @@ async function main() {
   const tl = schedule(buildTimeline());
   const clawds = tl.filter(e => e.type === 'clawd').length;
   const files = tl.filter(e => e.type === 'file').length;
-  console.log(`${path.basename(REC)}: ${tl.length} events (${clawds} clawd, ${files} file writes), ${fmt(tl.at(-1)?.at || 0)} at speed ${+SPEED.toFixed(2)}${MAX_GAP < Infinity ? `, max-gap ${MAX_GAP / 1000}s` : ''}${MAX_TOOL < Infinity ? `, max-tool ${MAX_TOOL / 1000}s` : ''}, hooks: ${HOOKS}`);
+  console.log(`${path.basename(REC)}: ${tl.length} events (${clawds} clawd, ${files} file writes), ${fmt(tl.at(-1)?.at || 0)} at speed ${+SPEED.toFixed(2)}${MAX_GAP < Infinity ? `, max-gap ${MAX_GAP / 1000}s` : ''}${MAX_TOOL < Infinity ? `, max-tool ${MAX_TOOL / 1000}s` : ''}${LONG_TOOL ? `, long-tool ${LONG_TOOL / 1000}s` : ''}, hooks: ${HOOKS}`);
   console.log(`project ${PROJECT}  tmux "${TMUX}" pane ${PANE || '(none)'}`);
   if (DRY) {
     for (const e of tl) console.log(fmt(e.at), describe(e));
