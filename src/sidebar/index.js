@@ -17,7 +17,7 @@ import '@/common/browser';
 import { sendCmdDirectly } from '@/common';
 import { clawdSvg, esc, injectTheme, siteOf } from '@/common/cm-theme';
 import { CLAWD_CSS, clawdSpriteHtml, eyeOffset, lookAt, setMood, tossBottle } from '@/common/clawd-art';
-import { MOOD_LABEL } from '@/common/clawd-actions';
+import { DODGED, MOOD_LABEL, plainSay } from '@/common/clawd-actions';
 
 injectTheme(`${CLAWD_CSS}
 html, body { height: 100%; }
@@ -63,8 +63,6 @@ body { display: flex; flex-direction: column; user-select: text; }
 .mascot.away { cursor: default; }
 .speech { position: relative; flex: 0 1 auto; min-width: 0; margin-bottom: 30px; padding: 7px 11px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
 .speech::before { content: ""; position: absolute; left: -6px; bottom: 10px; width: 10px; height: 10px; background: var(--surface); border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); transform: rotate(45deg); }
-.waterc { position: absolute; right: 12px; top: 6px; font-size: 11px; color: #3a7bd5; }
-.waterc:empty { display: none; }
 .ask { margin: 4px 0 12px; padding: 10px 12px; border-radius: 12px; border: 1.5px solid var(--accent); background: var(--surface); box-shadow: var(--shadow); }
 .ask.done { border-color: var(--border); box-shadow: none; opacity: .8; }
 .ask-h { font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--accent); margin-bottom: 4px; }
@@ -106,7 +104,6 @@ document.body.innerHTML = `
   <div class="stage">
     <div class="mascot" id="mascot" title="Click to tickle"><div class="mclip"><div class="mface">${clawdSpriteHtml(112)}</div></div></div>
     <div class="speech" id="speech">Hi!</div>
-    <div class="waterc" id="waterc" title="Water guzzled so far (it's a joke)"></div>
   </div>
   <div id="result"></div>
   <div class="composer">
@@ -137,44 +134,39 @@ let codeOpen = false;
 
 const mascotEl = $('mascot');
 const spriteEl = mascotEl.querySelector('svg');
-const LITRES_KEY = 'clawdify-litres';
 let stageMood = 'idle';
 let stageText = '';
 let busy = false;
 let waterUntil = 0;
 let nextWater = 0;
-let litres = 0;
-try { litres = +localStorage.getItem(LITRES_KEY) || 0; } catch { /* storage blocked */ }
 let tickleUntil = 0;
+let missUntil = 0;
+let missText = '';
 let tickles = 0;
 let lastTickle = 0;
 let throwUntil = 0;
 let tickleText = '';
 let mouse = null;
-const TICKLES = ['Hehe! 😆', 'Hahaha, stop it!', 'I’m trying to work here! 😂', 'OK OK, you win! 🏳️'];
+const TICKLES = ['Hehe!', 'Hahaha, stop it!', 'I’m trying to work here!', 'OK OK, you win!'];
 const MASCOT_W = 112;
 const EYES = eyeOffset(MASCOT_W);
 
 const sfx = name => sendCmdDirectly('ClawdSound', { name }).catch(() => {});
 
-function showWater() {
-  $('waterc').textContent = litres ? `💧 ${litres.toFixed(1)} L guzzled` : '';
-}
-showWater();
-
 function paintStage() {
   if (mascotEl.classList.contains('moving')) return; // mid-walk
   const now = Date.now();
   const drinking = waterUntil > now;
-  const mood = drinking ? 'water' : throwUntil > now ? 'throw' : stageMood;
+  const missed = missUntil > now;
+  const mood = drinking ? 'water' : throwUntil > now ? 'throw' : missed ? 'sad' : stageMood;
   setMood(spriteEl, mood, tickleUntil > now ? 'cw-tickle' : '');
   $('speech').textContent = away ? `On the page → ${stageText}`
-    : tickleUntil > now ? tickleText : drinking ? MOOD_LABEL.water : stageText;
+    : tickleUntil > now ? tickleText : drinking ? MOOD_LABEL.water : missed ? missText : stageText;
 }
 
 function setStage(mood, text, color) {
   stageMood = mood;
-  stageText = text;
+  stageText = plainSay(text);
   if (color) mascotEl.style.setProperty('--paint', color);
   paintStage();
 }
@@ -222,7 +214,17 @@ setInterval(() => {
       const hx = r.left + r.width * 0.78;
       const hy = r.top + r.height * 0.45;
       const aim = mouse || { x: hx + 140, y: hy - 160 };
-      tossBottle(document, document.body, hx, hy, aim.x, aim.y);
+      tossBottle(document, document.body, hx, hy, aim.x, aim.y, mouse && {
+        cursor: () => mouse,
+        onHit: () => sfx('dink'),
+        onMiss: () => {
+          missUntil = Date.now() + 2200;
+          missText = DODGED[Math.floor(Math.random() * DODGED.length)];
+          sfx('sniffle');
+          paintStage();
+          setTimeout(paintStage, 2250);
+        },
+      });
       paintStage();
     }, 450);
   }
@@ -233,9 +235,6 @@ setInterval(() => {
     nextWater = now + 25000 + Math.random() * 20000;
     [700, 1150, 1600, 2050].forEach(t => setTimeout(() => waterUntil && sfx('glug'), t));
     setTimeout(() => waterUntil && sfx('ahh'), 2750);
-    litres += 0.5;
-    try { localStorage.setItem(LITRES_KEY, String(litres)); } catch { /* ignore */ }
-    showWater();
     paintStage();
   }
   if (throwUntil && now > throwUntil) throwUntil = 0;
@@ -246,7 +245,7 @@ function stageFor(thread, running, busyHere) {
   const last = thread[thread.length - 1];
   if (!domain) return ['idle', 'Open a web page and I’ll remodel it for you!'];
   if (busyHere && last && last.events.some(ev => ev.type === 'approval' && ev.state === 'pending')) {
-    return ['wave', 'I need your OK below 👇'];
+    return ['wave', 'I need your OK below'];
   }
   if (busyHere && last) {
     for (let i = last.events.length - 1; i >= 0; i--) {
@@ -260,7 +259,7 @@ function stageFor(thread, running, busyHere) {
   if (running) return ['walk', `Busy over on ${running.domain}…`];
   const ago = last && last.endedAt ? Date.now() - last.endedAt : Infinity;
   if (last && last.status === 'error' && ago < 9000) return ['error', MOOD_LABEL.error];
-  if (last && last.status === 'done' && ago < 7000) return ['done', `${MOOD_LABEL.done} ✨`];
+  if (last && last.status === 'done' && ago < 7000) return ['done', MOOD_LABEL.done];
   if (thread.length) return ['idle', `Anything else for ${domain}?`];
   if (state && state.script) return ['idle', `I’ve already tuned ${domain}. Want more changes?`];
   return ['idle', `Hi! Tell me how to change ${domain}.`];
@@ -272,7 +271,7 @@ const hostPath = u => { try { const x = new URL(u); return x.host + x.pathname; 
 
 function renderApproval(ev, job) {
   const pending = ev.state === 'pending';
-  const result = { approved: ['ok', 'Approved ✓'], denied: ['no', 'Denied'], expired: ['no', 'No answer — skipped'] }[ev.state];
+  const result = { approved: ['ok', 'Approved ✓'], denied: ['no', 'Denied'], expired: ['no', 'No answer, skipped'] }[ev.state];
   return `<div class="ask${pending ? '' : ' done'}">
     <div class="ask-h">${pending ? '🔐 Claude asks to' : 'Claude asked to'}</div>
     <div class="ask-what">${esc(ev.what)}</div>

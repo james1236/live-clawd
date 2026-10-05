@@ -192,10 +192,7 @@ function handleMessage(msg) {
   }
   if (msg.type === 'live-ack' && msg.ackId) {
     // The browser has the choreography: release the waiting `clawd` tool call.
-    try {
-      fs.mkdirSync(path.join(LIVE_DIR, 'acks'), { recursive: true });
-      fs.writeFileSync(path.join(LIVE_DIR, 'acks', String(msg.ackId).replace(/[^\w.-]/g, '')), '');
-    } catch { /* it just waits out its timeout */ }
+    writeAck(msg.ackId, msg.status);
     return;
   }
   if (msg.type === 'generate') {
@@ -362,6 +359,9 @@ function startLive() {
   beat();
   // Anything spooled before we started listening is stale.
   try { for (const f of fs.readdirSync(SPOOL_DIR)) fs.unlinkSync(path.join(SPOOL_DIR, f)); } catch { /* ignore */ }
+  // ...and so are acks that arrived after their `clawd` call stopped waiting.
+  const ackDir = path.join(LIVE_DIR, 'acks');
+  try { for (const f of fs.readdirSync(ackDir)) fs.unlinkSync(path.join(ackDir, f)); } catch { /* ignore */ }
   liveTimers = [setInterval(beat, 5000), setInterval(drainSpool, 250)];
   // Pick events up as soon as they land (the poll is the fallback).
   try { fs.watch(SPOOL_DIR, () => drainSpool()); } catch { /* polling only */ }
@@ -391,6 +391,24 @@ function loadLiveConfig() {
   } catch {
     return { projects: {}, ignore: [] };
   }
+}
+
+/**
+ * Did a command that exited 0 still fail? (`pnpm test 2>&1 | tail` exits with tail's
+ * status.) Looks at the end of its output for the usual failure summaries.
+ */
+function looksFailed(res) {
+  if (!res || typeof res !== 'object') return false;
+  const tail = `${String(res.stdout || '').slice(-3000)}\n${String(res.stderr || '').slice(-1500)}`;
+  return /\b[1-9]\d* (failed|failing|errors?)\b|\bTests?:.*\b[1-9]\d* failed|\bFAIL(ED)?\b|npm ERR!|ERR_PNPM|error TS\d+|Build failed|Command failed with exit code [1-9]|✖ [1-9]\d* problems?/.test(tail);
+}
+
+/** Release a waiting `clawd` tool call, with what happened: '' (played), 'no-tab', 'no-server'. */
+function writeAck(ackId, status) {
+  try {
+    fs.mkdirSync(path.join(LIVE_DIR, 'acks'), { recursive: true });
+    fs.writeFileSync(path.join(LIVE_DIR, 'acks', String(ackId).replace(/[^\w.-]/g, '')), String(status || ''));
+  } catch { /* it just waits out its timeout */ }
 }
 
 const rootCache = new Map();
@@ -537,7 +555,11 @@ function relayLive(ev) {
   const cfg = loadLiveConfig();
   if (cfg.ignore.some(p => inside(root, p))) return;
   const ports = devPorts(root, cfg);
-  if (!ports.length) return;
+  if (!ports.length) {
+    // Tell a waiting `clawd` call why nothing will play, so Claude backs off for a while.
+    if (choreo && choreo.ackId) writeAck(choreo.ackId, 'no-server');
+    return;
+  }
   const out = {
     type: 'live',
     // One Clawd per Claude session: its tmux pane when there is one (the `clawd` tool
@@ -554,18 +576,31 @@ function relayLive(ev) {
     sendMessage(out);
     return;
   }
-  if (ev.hook_event_name === 'PostToolUse') {
-    // Only tools that can touch files; report what really changed on disk.
-    if (!/^(Bash|Edit|Write|MultiEdit|NotebookEdit)$/.test(ev.tool_name || '')) return;
-    const changes = scanChanges(root);
-    if (!changes.length) return;
-    out.changes = changes;
+  // A subagent's own tool calls: its mini Clawd is off-screen, the main one stays put.
+  if (ev.agent_id && /ToolUse/.test(ev.hook_event_name || '')) return;
+  if (ev.hook_event_name === 'PostToolUse' || ev.hook_event_name === 'PostToolUseFailure') {
+    // Ends the action that's been showing since PreToolUse (and says how it went).
+    out.event = 'PostToolUse';
+    out.tool = ev.tool_name;
+    out.toolId = ev.tool_use_id || '';
+    out.ok = ev.hook_event_name === 'PostToolUse' && !looksFailed(ev.tool_response);
+    out.interrupted = !!ev.is_interrupt || !!(ev.tool_response && ev.tool_response.interrupted);
+    // Tools that can touch files: report what really changed on disk.
+    out.changes = /^(Bash|Edit|Write|MultiEdit|NotebookEdit)$/.test(ev.tool_name || '') ? scanChanges(root) : [];
     sendMessage(out);
     return;
+  }
+  if (ev.hook_event_name === 'SubagentStart' || ev.hook_event_name === 'SubagentStop') {
+    out.agentId = String(ev.agent_id || '');
+    out.agentType = String(ev.agent_type || '').slice(0, 30);
+  } else if (ev.hook_event_name === 'PreCompact') {
+    out.trigger = String(ev.trigger || '');
   }
   if (ev.hook_event_name === 'PreToolUse') {
     const input = ev.tool_input || {};
     out.tool = ev.tool_name;
+    out.toolId = ev.tool_use_id || '';
+    out.bg = !!input.run_in_background;
     out.detail = toolDetail({ name: ev.tool_name, input });
     if (input.file_path) out.file = path.relative(root, String(input.file_path));
     out.say = lastNarration(ev.transcript_path);

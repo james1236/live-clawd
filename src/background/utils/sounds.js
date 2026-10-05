@@ -13,8 +13,9 @@ browser.storage.local.get(KEY).then(r => { settings = { ...settings, ...r[KEY] }
 
 addPublicCommands({
   /** From an overlay or the sidebar: play one of Clawd's sounds. */
-  ClawdSound({ name } = {}) {
+  ClawdSound({ name } = {}, src) {
     if (!settings.enabled) return;
+    if (src && src.tab && !src.tab.active) return; // only the tab you're looking at
     // Several Clawds (or a burst) shouldn't stack the same sound into a din.
     const now = Date.now();
     if (now - (lastPlayed.get(name) || 0) < 45) return;

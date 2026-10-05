@@ -32,7 +32,7 @@ one \`clawd\` tool call in the SAME message as the edit, placed before it — ne
 message of its own. Give steps naming where the change shows up (React component,
 selector, visible text, or \`{selector, x, y}\` fractions for things drawn on a canvas), an
 action from the tool's list, and a caption of 8 words or fewer. Skip it for non-UI work,
-inside subagents, and for the rest of the session once it returns "off". It must never
+inside subagents, and for the next ~10 UI edits after it returns "off". It must never
 influence what you build; never mention Clawd in replies, code or commits.
 ${END}`;
 

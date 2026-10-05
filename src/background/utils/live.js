@@ -71,7 +71,7 @@ function connect() {
 function scheduleRetry() {
   if (!settings.enabled) return;
   retryTimer = setTimeout(connect, retryMs);
-  retryMs = Math.min(retryMs * 2, 300000);
+  retryMs = Math.min(retryMs * 2, 30000); // the bridge may just be restarting
 }
 
 function disconnect() {
@@ -91,8 +91,7 @@ function colorFor(win, session) {
 
 function toOverlay(ev) {
   // "3 claude" -> window 3, named "claude"
-  const [win, ...name] = String(ev.tmux || '').trim().split(/\s+/);
-  const where = win ? `tmux window ${win}${name.length ? ` (${name.join(' ')})` : ''}` : '';
+  const [win] = String(ev.tmux || '').trim().split(/\s+/);
   const base = {
     id: `live:${ev.session}`,
     tag: win ? `${ev.project} · tmux ${win}` : ev.project,
@@ -113,16 +112,34 @@ function toOverlay(ev) {
       })),
     };
   case 'PostToolUse':
-    // What really changed on disk, however Claude edited it.
-    return { ...base, op: 'act', ...classifyChange(ev.changes[0]) };
+    // The tool finished: end what's been showing since it started (with a reaction if
+    // it was something like the tests), then act out what really changed on disk.
+    return [
+      { ...base, op: 'end', toolId: ev.toolId, ok: !!ev.ok, interrupted: !!ev.interrupted },
+      ev.changes && ev.changes.length && { ...base, op: 'act', ...classifyChange(ev.changes[0]) },
+    ].filter(Boolean);
   case 'UserPromptSubmit':
-    return { ...base, op: 'act', kind: 'think', selectors: [], label: ev.message ? `On it: “${ev.message}”` : 'New request!' };
+    // Thinking until the first tool call (a long think turns into the chalkboard).
+    return {
+      ...base, op: 'act', kind: 'think', selectors: [], hold: true, toolId: 'prompt',
+      label: ev.message ? `On it: “${ev.message}”` : 'New request!',
+    };
   case 'PreToolUse': {
+    if (ev.bg) return { ...base, op: 'act', kind: 'timer', selectors: [], label: MOOD_LABEL.background };
     const a = classifyTool(ev.tool, ev.detail, ev.file || '');
     // Claude's own narration is the best caption when the action itself is generic.
     if (ev.say && ['think', 'read', 'tinker', 'hack'].includes(a.kind)) a.label = ev.say;
-    return { ...base, op: 'act', ...a };
+    // Shown until the tool ends, however long that takes.
+    return { ...base, op: 'act', ...a, toolId: ev.toolId, hold: !!ev.toolId };
   }
+  case 'SubagentStart':
+  case 'SubagentStop':
+    // A mini Clawd heads off to do it, and comes back with the results.
+    return { ...base, op: 'helper', on: ev.event === 'SubagentStart', agentId: ev.agentId, label: ev.agentType };
+  case 'PreCompact':
+    return { ...base, op: 'act', kind: 'compact', selectors: [], label: MOOD_LABEL.compact, hold: true, toolId: 'compact' };
+  case 'PostCompact':
+    return { ...base, op: 'end', toolId: 'compact', ok: true };
   case 'Notification':
     return {
       ...base,
@@ -130,7 +147,7 @@ function toOverlay(ev) {
       kind: 'wave',
       selectors: [],
       sign: win ? `#${win}` : '!?',
-      label: `${ev.message || MOOD_LABEL.wave}${where ? ` — ${where}` : ''}`,
+      label: ev.message || MOOD_LABEL.wave, // the window is already on his sign and name tag
     };
   case 'Stop':
     return { ...base, op: 'done' };
@@ -174,9 +191,23 @@ function deliver(tabId, msg) {
 }
 
 async function onEvent(ev) {
-  const msg = toOverlay(ev);
-  if (!msg) { ack(ev); return; }
+  const out = toOverlay(ev);
+  if (!out) { ack(ev); return; }
+  if (Array.isArray(out)) {
+    for (const m of out) await onMessage(ev, m);
+    return;
+  }
+  await onMessage(ev, out);
+}
+
+async function onMessage(ev, msg) {
   const st = sessions.get(ev.session);
+  if (msg.op === 'end' || msg.op === 'helper') {
+    // Straight through, not paced: an end must never wait behind the next action.
+    if (msg.op === 'end' && st && st.last && st.last.toolId === msg.toolId) st.last = { ...st.last, hold: false };
+    for (const t of await targetTabs(ev.ports)) clawdNow(t.id, msg);
+    return;
+  }
   if (msg.op === 'play') {
     const total = msg.steps.reduce((t, x) => t + x.ms, 0);
     // Claude's own choreography outranks the guesses from hooks while it plays.
@@ -192,9 +223,9 @@ async function onEvent(ev) {
   for (const t of await targetTabs(ev.ports)) deliver(t.id, msg);
 }
 
-function ack(ev) {
+function ack(ev, status = '') {
   if (ev.ackId && port) {
-    try { port.postMessage({ type: 'live-ack', ackId: ev.ackId }); } catch { /* gone */ }
+    try { port.postMessage({ type: 'live-ack', ackId: ev.ackId, status }); } catch { /* gone */ }
   }
 }
 
@@ -204,18 +235,32 @@ function ack(ev) {
  * `clawd` tool call — which lets Claude's edit go ahead.
  */
 async function play(ev, msg) {
+  let tabs = [];
   try {
-    for (const t of await targetTabs(ev.ports)) {
+    tabs = await targetTabs(ev.ports);
+    for (const t of tabs) {
       const res = await clawdNow(t.id, msg);
       if (res && res.ghosts && res.ghosts.length) {
         try {
-          const imgs = await cropVisible(t.windowId, res.ghosts.map(g => g.rect), res.dpr);
+          // Keep the Clawds themselves out of the "before" picture: whatever of them
+          // overlaps these spots steps aside until the next paint has been shot.
+          const rects = res.ghosts.map(g => g.rect);
+          await clawdNow(t.id, { op: 'peek', on: true, rects });
+          await browser.tabs.executeScript(t.id, {
+            code: 'new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(1))))',
+          }).catch(() => {});
+          let imgs;
+          try {
+            imgs = await cropVisible(t.windowId, rects, res.dpr);
+          } finally {
+            clawdNow(t.id, { op: 'peek', on: false });
+          }
           clawdNow(t.id, { op: 'ghosts', id: msg.id, ghosts: res.ghosts.map((g, i) => ({ ...g, src: imgs[i] })) });
         } catch { /* no snapshot: he vacuums an empty spot */ }
       }
     }
   } finally {
-    ack(ev);
+    ack(ev, tabs.length ? '' : 'no-tab');
   }
 }
 

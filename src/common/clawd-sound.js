@@ -105,6 +105,17 @@ const SOUNDS = {
   sniffle: () => { noise(0.07, { vol: 0.1, freq: 2600, q: 3 }); noise(0.09, { vol: 0.1, freq: 2300, q: 3, at: 0.12 }); },
   phew: () => { noise(0.35, { vol: 0.1, freq: 1300, to: 500 }); tone(640, 0.25, { type: 'sine', vol: 0.18, to: 420, at: 0.05 }); },
   tape: () => tone(rnd(220, 260), 0.06, { type: 'square', vol: 0.05 }),
+  // long waits, results, helpers
+  snore: () => { noise(1.1, { vol: 0.07, freq: 300, to: 520, kind: 'lowpass' }); tone(95, 1.1, { type: 'sawtooth', vol: 0.03, to: 110, vibrato: 6 }); },
+  yawn: () => tone(520, 0.9, { type: 'triangle', vol: 0.16, to: 230, vibrato: 8 }),
+  crunch: () => [0, 0.09, 0.2, 0.27].forEach(at => noise(0.07, { vol: 0.22, freq: rnd(700, 1400), q: 2, at })),
+  ding: () => { tone(1568, 0.6, { type: 'sine', vol: 0.2 }); tone(2093, 0.5, { type: 'sine', vol: 0.08, at: 0.01 }); },
+  scribble: () => [0, 0.07, 0.16].forEach(at => noise(0.05, { vol: 0.1, freq: rnd(3000, 4200), q: 4, at })),
+  rustle: () => noise(0.25, { vol: 0.12, freq: 1800, to: 1100, q: 1.5 }),
+  dink: () => { tone(2350, 0.12, { type: 'sine', vol: 0.3, to: 2250 }); tone(3520, 0.08, { type: 'sine', vol: 0.12 }); tone(5100, 0.05, { type: 'sine', vol: 0.05 }); },
+  click: () => tone(rnd(1900, 2200), 0.02, { type: 'square', vol: 0.05 }),
+  yes: () => { tone(523, 0.08, { type: 'square', vol: 0.14 }); tone(784, 0.08, { type: 'square', vol: 0.14, at: 0.09 }); tone(1047, 0.22, { type: 'square', vol: 0.14, at: 0.18 }); },
+  facepalm: () => { noise(0.06, { vol: 0.3, freq: 900, q: 1 }); tone(330, 0.5, { type: 'triangle', vol: 0.18, to: 196, at: 0.12 }); },
 };
 
 /** Map of overlay moods to the sound they make, and how often (ms) while it lasts. */
@@ -115,6 +126,9 @@ export const ACTION_SOUNDS = {
   watch: ['hmm', 2000], dance: ['note', 250], photo: ['shutter', 1600], stash: ['creak', 1600],
   polish: ['shimmer', 1000], search: ['sonar', 1300], read: ['flip', 1400], think: ['thought', 1200],
   fetch: ['step', 320], tinker: ['bonk', 1200], wave: ['dingdong', 8000], sad: ['sniffle', 2600],
+  test: ['tick', 800], compile: ['bonk', 700], install: ['rustle', 1100], mail: ['whoosh', 1800],
+  ponder: ['scribble', 1700], wait: ['flip', 5000], knit: ['click', 380], doze: ['snore', 3200],
+  timer: ['click', 160], compact: ['crunch', 1300],
 };
 
 export const SOUND_NAMES = Object.keys(SOUNDS);

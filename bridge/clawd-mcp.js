@@ -3,8 +3,9 @@
  * Live Clawd's MCP server (stdio), registered at user scope in Claude Code so every
  * session has a `clawd` tool. Claude calls it in the same message as a UI edit to say
  * where on the page the change shows up and how Clawd should act it out. Purely
- * cosmetic: it spools the choreography for the Clawdify bridge and returns "ok" — or
- * "off" when Firefox isn't listening, so Claude stops calling it.
+ * cosmetic: it spools the choreography for the Clawdify bridge and returns "ok", or
+ * "off: <why>" (Firefox isn't listening, or the project has no dev server running) so
+ * Claude skips it for a while.
  *
  * It waits briefly (≤1.2s) for the browser to confirm it has the choreography — and has
  * snapshotted anything about to be removed — so Clawd acts *before* hot reload lands.
@@ -46,7 +47,7 @@ const ACTIONS = {
 const TOOL = {
   name: 'clawd',
   description: 'Cosmetic: animates Clawd on the user\'s open localhost dev page to show what your UI edit does. '
-    + 'Call it in the SAME message as the edit, before it. Returns "ok", or "off" (then stop calling it this session). '
+    + 'Call it in the SAME message as the edit, before it. Returns "ok", or "off: <why>" (then skip it for a while, as it says). '
     + `Actions: ${Object.entries(ACTIONS).map(([k, v]) => `${k} (${v})`).join(', ')}.`,
   inputSchema: {
     type: 'object',
@@ -73,7 +74,7 @@ const TOOL = {
               },
             },
             action: { type: 'string', enum: Object.keys(ACTIONS) },
-            say: { type: 'string', description: 'Caption, ≤8 words.' },
+            say: { type: 'string', description: 'Caption, ≤8 words, no emojis or em dashes.' },
             color: { type: 'string', description: 'New colour, for paint/spray.' },
             ms: { type: 'integer', minimum: 1000, maximum: 6000 },
           },
@@ -104,8 +105,12 @@ function listening() {
   try { return Date.now() - fs.statSync(path.join(LIVE_DIR, 'alive')).mtimeMs < 20000; } catch { return false; }
 }
 
+const OFF = 'off: Firefox isn\'t running Clawdify. Skip clawd for your next ~10 UI edits, then try once more.';
+const NO_SERVER = 'off: no dev server for this project is listening on localhost. '
+  + 'Skip clawd for your next ~10 UI edits, then try once more. Don\'t start one for Clawd\'s sake.';
+
 async function clawd(args) {
-  if (!listening()) return 'off';
+  if (!listening()) return OFF;
   const ackId = `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
   const ev = {
     clawd: true,
@@ -121,11 +126,15 @@ async function clawd(args) {
   fs.renameSync(`${f}.tmp`, f);
   // Give the browser a moment to pick it up (and snapshot what's about to change).
   const ack = path.join(ACK_DIR, ackId);
+  let status = '';
   for (const end = Date.now() + ACK_WAIT_MS; Date.now() < end;) {
-    if (fs.existsSync(ack)) { try { fs.unlinkSync(ack); } catch { /* raced */ } break; }
+    if (fs.existsSync(ack)) {
+      try { status = fs.readFileSync(ack, 'utf8'); fs.unlinkSync(ack); } catch { /* raced */ }
+      break;
+    }
     await new Promise(r => setTimeout(r, 40));
   }
-  return 'ok';
+  return status === 'no-server' ? NO_SERVER : 'ok'; // 'no-tab': the user is just looking elsewhere
 }
 
 const send = obj => process.stdout.write(`${JSON.stringify(obj)}\n`);

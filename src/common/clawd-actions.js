@@ -72,7 +72,7 @@ const TAB_TOOLS = {
 
 /** Captions when the change has no particular element to point at. */
 const NO_SEL_LABEL = {
-  hack: 'Hacking the network 😎',
+  hack: 'Hacking the network',
   stash: 'Stashing data in the vault',
   add: 'Building something new',
   watch: 'Keeping watch over the page',
@@ -140,13 +140,14 @@ function shortSel(sel) {
 }
 
 /** What a shell command looks like it's doing (Live Clawd). */
+/** [pattern, mood, caption, task]: a task gets a reaction when it ends (see TASK_RESULT). */
 const BASH_KINDS = [
-  [/\b(vitest|jest|pytest|mocha|playwright|cypress|(npm|pnpm|yarn|bun)( run)? test|cargo test|go test|make test|check)\b/, 'search', 'Running the tests'],
-  [/\b(eslint|prettier|lint|ruff|clippy|stylelint|black|biome)\b/, 'polish', 'Linting and tidying'],
-  [/\b(tsc|build|make|cargo build|go build|webpack|vite build|gulp|compile|cmake|ninja)\b/, 'build', 'Building the project'],
-  [/\b(npm (i|install|add)|pnpm (i|install|add)|yarn add|pip install|cargo add|apt|brew)\b/, 'fetch', 'Installing packages'],
+  [/\b(vitest|jest|pytest|mocha|playwright|cypress|(npm|pnpm|yarn|bun)( run)? test|cargo test|go test|make test|check)\b/, 'test', 'Running the tests', 'test'],
+  [/\b(eslint|prettier|lint|ruff|clippy|stylelint|black|biome)\b/, 'polish', 'Linting and tidying', 'lint'],
+  [/\b(tsc|build|make|cargo build|go build|webpack|vite build|gulp|compile|cmake|ninja)\b/, 'compile', 'Building the project', 'build'],
+  [/\b(npm (i|install|add)|pnpm (i|install|add)|yarn add|pip install|cargo add|apt|brew)\b/, 'install', 'Installing packages', 'install'],
   [/\bgit (commit|add|stash)\b/, 'stash', 'Committing to git'],
-  [/\bgit (push|pull|fetch|clone)\b/, 'fetch', 'Syncing with the remote'],
+  [/\bgit (push|pull|fetch|clone)\b/, 'mail', 'Syncing with the remote', 'sync'],
   [/\bgit\b/, 'read', 'Checking git'],
   [/\b(curl|wget|http)\b/, 'fetch', 'Fetching from the web'],
   [/\b(ls|cat|head|tail|grep|rg|find|fd|tree|wc|less)\b/, 'search', 'Poking around the files'],
@@ -185,7 +186,10 @@ function classifySource(name, detail, file) {
   const short = fileName(file);
   if (name === 'Bash') {
     const hit = BASH_KINDS.find(([re]) => re.test(detail));
-    return { kind: hit ? hit[1] : 'hack', selectors: [], label: hit ? hit[2] : `Running ${detail.split(/\s+/)[0] || 'a command'}` };
+    return {
+      kind: hit ? hit[1] : 'hack', selectors: [], task: hit && hit[3],
+      label: hit ? hit[2] : `Running ${detail.split(/\s+/)[0] || 'a command'}`,
+    };
   }
   if (name === 'Read' || name === 'NotebookRead') return { kind: 'read', selectors: [], label: `Reading ${short || 'a file'}` };
   if (name === 'Grep' || name === 'Glob') return { kind: 'search', selectors: [], pattern: name === 'Grep' ? detail : '', label: `Searching for “${detail.slice(0, 24)}”` };
@@ -306,12 +310,41 @@ function classifyCode(detail) {
   return action;
 }
 
+// Emoji blocks (pictographs, symbols, dingbats, flags), plus variation selector, joiner,
+// keycap and tag characters. Explicit ranges: the build's regex transpiler rejects \p{…}.
+const EMOJI = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{2300}-\u{23FF}\u{E0020}-\u{E007F}]|\u{FE0F}|\u{200D}|\u{20E3}/gu;
+
+/** What Clawd says, minus emojis and em dashes (Claude's own `say` text included). */
+export function plainSay(text) {
+  return String(text || '')
+    .replace(/\s*[\u2014\u2013]\s*/g, ', ')
+    .replace(EMOJI, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([,.!?…])/g, '$1')
+    .trim();
+}
+
+/** What Clawd says when you dodge his empty water bottle. */
+export const DODGED = ['Aw, you dodged it…', 'Hey, you moved! Not fair…', 'Missed… you’re too quick', 'I was aiming for you…'];
+
+/** What Clawd says when a task ends: [worked, didn't]. */
+export const TASK_RESULT = {
+  test: ['Tests passed!', 'Tests failed'],
+  lint: ['All tidy!', 'Lint found problems'],
+  build: ['Build succeeded!', 'Build failed'],
+  install: ['Installed!', 'Install failed'],
+  sync: ['Synced!', 'Sync failed'],
+};
+
 /** Caption for moods that aren't tool calls. */
 export const MOOD_LABEL = {
   idle: 'Ready when you are',
   think: 'Thinking…',
   done: 'All done!',
   error: 'Oops, that didn’t work',
-  wave: 'Need you in the terminal 👋',
+  wave: 'Need you in the terminal',
   water: 'Hydrating… AI is thirsty work',
+  ponder: 'Thinking it through',
+  compact: 'Compacting my memory',
+  background: 'Left it running in the background',
 };

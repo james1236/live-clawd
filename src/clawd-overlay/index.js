@@ -12,9 +12,17 @@
  *       vacuumed up, a crossfade
  *   {op: 'act', id, kind, selectors, components, pattern, label, …}  a guessed action
  *       (Clawdify jobs, hook fallbacks): shown only while no choreography is playing
+ *       (`hold` + `toolId`: keep at it until the matching 'end'; a long wait becomes
+ *       sitting with a book or knitting, then dozing off)
+ *   {op: 'end', id, toolId, ok, interrupted}  that tool finished: stop, and cheer or
+ *       facepalm if it was a task like the tests
+ *   {op: 'helper', id, on, agentId, label}  a subagent: a mini Clawd walks off to do it
+ *       (on) and comes back with the results (off)
  *   {op: 'done' | 'error', id}  celebrate / droop after the queue, then walk off
  *   {op: 'leave', id}     walk off once the queue is done
  *   {op: 'hide'}          remove every Clawd at once (before DOM snapshots/screenshots)
+ *   {op: 'peek', on, rects}  while "before" pictures of `rects` are taken, cut holes in
+ *       whatever of the Clawds overlaps them (never the covers); off again after
  * One Clawd per `id`, in its own colour with a name tag. Live Clawds never scroll.
  *
  * Everything lives in a closed shadow root on a fixed, click-through layer (only
@@ -22,7 +30,7 @@
  * with DOM APIs (no innerHTML) so it works on pages enforcing Trusted Types.
  */
 import { CLAWD_CSS, VIEWBOX, clawdSpriteNode, eyeOffset, lookAt, setMood, tossBottle } from '@/common/clawd-art';
-import { MOOD_LABEL } from '@/common/clawd-actions';
+import { DODGED, MOOD_LABEL, TASK_RESULT, plainSay } from '@/common/clawd-actions';
 import { ACTION_SOUNDS } from '@/common/clawd-sound';
 
 function install() {
@@ -34,11 +42,18 @@ function install() {
   const HAND = { x: 6 * UNIT, y: 5 * UNIT }; // his working hand, relative to his feet
   const SPEED = 420; // px/s walking
   const RUN = 900; // px/s on long trips
-  const BELOW = 38; // room under his feet for the name tag and water counter
+  const BELOW = 22; // room under his feet for the name tag
   const NEAR = 190; // px: eyes follow the cursor within this
   const GUESS_MS = 2200; // how long a guessed action shows
+  const HOLD_MS = 10 * 60000; // a held action (tool still running) gives up after this
+  const SIT_AFTER = 20000; // ...sits down with a book or some knitting after this
+  const DOZE_AFTER = 180000; // ...and nods off after this
+  const PONDER_AFTER = 12000; // thinking this long (or idle between tools): the chalkboard
+  const REACT_MS = 1800; // cheering or facepalming at a task's result
+  const MINI_W = 46; // px: a helper Clawd
+  const MINI_SPEED = 260; // px/s
   const EYES = eyeOffset(SPRITE_W);
-  const TICKLES = ['Hehe! 😆', 'Hahaha, stop it!', 'I’m trying to work here! 😂', 'OK OK, you win! 🏳️'];
+  const TICKLES = ['Hehe!', 'Hahaha, stop it!', 'I’m trying to work here!', 'OK OK, you win!'];
 
   const STYLE = `
 :host { all: initial; }
@@ -70,10 +85,13 @@ function install() {
 .tag { position: absolute; left: 50%; top: calc(100% + 1px); transform: translateX(-50%); white-space: nowrap;
   font-size: 10px; font-weight: 600; color: #faf9f5; background: var(--clawd); border-radius: 7px; padding: 0 6px; opacity: .92; }
 .tag:empty { display: none; }
-.water { position: absolute; left: 50%; top: calc(100% + 17px); transform: translateX(-50%); white-space: nowrap;
-  font-size: 10px; color: #3a7bd5; background: rgba(255,255,255,.9); border-radius: 8px; padding: 1px 6px; display: none; }
-.water.on { display: block; }
-.tag:empty + .water { top: calc(100% + 2px); }
+.mini { position: absolute; left: 0; top: 0; width: ${MINI_W}px; height: ${Math.round(MINI_W * VIEWBOX.h / VIEWBOX.w)}px;
+  transition-property: transform, opacity; transition-timing-function: linear; will-change: transform;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,.25)); }
+.mini.gone { opacity: 0; transition-duration: .4s !important; }
+.minitag { position: absolute; left: 50%; top: calc(100% + 1px); transform: translateX(-50%); white-space: nowrap;
+  font-size: 9px; font-weight: 600; color: #faf9f5; background: var(--clawd); border-radius: 6px; padding: 0 5px; opacity: .9; }
+.minitag:empty { display: none; }
 
 /* effects inside the highlight box */
 .fx { position: absolute; inset: 0; }
@@ -134,7 +152,7 @@ ${CLAWD_CSS}`;
   const sfxAt = new Map();
   function sfx(name) {
     const now = performance.now();
-    if (now - (sfxAt.get(name) || 0) < 60) return;
+    if (document.visibilityState !== 'visible' || now - (sfxAt.get(name) || 0) < 60) return;
     sfxAt.set(name, now);
     try {
       if (typeof browser !== 'undefined') browser.runtime.sendMessage({ cmd: 'ClawdSound', data: { name } }).catch(() => {});
@@ -143,9 +161,9 @@ ${CLAWD_CSS}`;
 
   // --- Is the dev page broken right now? (Live Clawds get sad until it's fixed) -------
   const BROKEN_SAY = {
-    build: 'Oh no… the build broke 😢',
-    blank: 'Oh no… the page went blank 😢',
-    error: 'Oh no… something threw an error 😢',
+    build: 'Oh no… the build broke',
+    blank: 'Oh no… the page went blank',
+    error: 'Oh no… something threw an error',
   };
   let lastPageError = 0;
   let rootSeen = false;
@@ -172,7 +190,7 @@ ${CLAWD_CSS}`;
     for (const c of [...clawds.values()]) {
       if (!c.live) continue;
       if (next && !was) { sfx('sad'); c.nextSfx = now + 2600; }
-      else if (!next) { sfx('phew'); setLabel(c, 'Phew, fixed! 😅'); c.phewUntil = now + 1500; }
+      else if (!next) { sfx('phew'); setLabel(c, 'Phew, fixed!'); c.phewUntil = now + 1500; }
     }
   }
   document.addEventListener('mouseleave', () => { mouse = null; }, { passive: true });
@@ -215,7 +233,7 @@ ${CLAWD_CSS}`;
   }
 
   function dropDom(c) {
-    for (const n of [c.root, c.glow, c.box, ...c.ghosts]) n.remove();
+    for (const n of [c.root, c.glow, c.box, ...c.ghosts, ...[...c.helpers.values()].map(h => h.node)]) n.remove();
   }
 
   /** Tell the extension a Clawd has left this page (so the sidebar can have him back). */
@@ -258,11 +276,10 @@ ${CLAWD_CSS}`;
         hl: box, // effects() animates this one
         label: el('div', 'label', root),
         tagEl: el('div', 'tag', root),
-        waterEl: el('div', 'water', root),
-        queue: [], cur: null, ghosts: [],
+        queue: [], cur: null, ghosts: [], helpers: new Map(),
         pos: null, mood: 'idle', extra: '', idleMood: 'idle', glowRect: null, boxRect: null,
         leaving: false, endAfterQueue: null, lastWork: 0,
-        waterUntil: 0, nextWater: 0, litres: 0, throwUntil: 0,
+        waterUntil: 0, nextWater: 0, throwUntil: 0,
         tickleUntil: 0, tickles: 0, lastTickle: 0, noticeUntil: 0, near: false,
         offset: (clawds.size % 3) * 44, // later Clawds stand a little to the side
       };
@@ -434,7 +451,7 @@ ${CLAWD_CSS}`;
       fx = w - 70 - c.offset * 2;
       fy = h - BELOW;
     }
-    // Keep all of him on screen: caption above, name tag and water counter below.
+    // Keep all of him on screen: caption above, name tag below.
     fx = clamp(fx, FOOT_X + 4, w - (SPRITE_W - FOOT_X) - 4);
     fy = clamp(fy, FOOT_Y + 26, h - BELOW);
     return { x: fx - FOOT_X, y: fy - FOOT_Y };
@@ -485,6 +502,7 @@ ${CLAWD_CSS}`;
   }
 
   function setLabel(c, text) {
+    text = plainSay(text);
     if (c.label.textContent === text) return;
     c.label.textContent = text;
     c.labelW = 0; // re-measure
@@ -513,7 +531,7 @@ ${CLAWD_CSS}`;
       c.dismissed = true;
       sfx('pop');
       c.queue = [];
-      c.cur = { kind: 'idle', say: 'OK, I’ll wait 👍', ms: 700, id: ++stepSeq };
+      c.cur = { kind: 'idle', say: 'OK, I’ll wait', ms: 700, id: ++stepSeq };
       c.leaving = true;
       return;
     }
@@ -630,6 +648,8 @@ ${CLAWD_CSS}`;
     if (!step.el && hasTarget(step)) step.el = resolve(step);
     step.retryUntil = !step.el && hasTarget(step) ? now + 4000 : 0;
     if (step.say != null) setLabel(c, step.say);
+    c.pondering = false;
+    c.missUntil = 0;
     c.fx.replaceChildren();
     c.glowRect = c.glowRect && step.el ? c.glowRect : null;
     c.glow.classList.remove('ok');
@@ -641,12 +661,15 @@ ${CLAWD_CSS}`;
     c.nextSfx = 0;
     if (step.kind === 'done') sfx('happy');
     else if (step.kind === 'error') sfx('sad');
+    else if (step.kind === 'cheer') sfx('yes');
+    else if (step.kind === 'facepalm') sfx('facepalm');
+    else if (step.kind === 'timer') setTimeout(() => c.cur === step && sfx('ding'), 1700);
     // Backed up? Get through it quicker rather than skipping anything.
     const hurry = c.queue.length >= 3 ? 0.5 : 1;
     step.endAt = now + Math.max(900, step.ms * hurry);
     if (step.kind === 'done') {
       if (step.rect) c.glow.classList.add('ok');
-    } else if (!/^(idle|wave|error|think)$/.test(step.kind)) {
+    } else if (!/^(idle|wave|error|think|test|compile|install|mail|timer|compact|cheer|facepalm)$/.test(step.kind)) {
       effects(c, { kind: step.kind, color: step.color, measure: step.measure });
     }
     if (step.cover) reveal(c, step, revealStyle(step.kind));
@@ -660,7 +683,7 @@ ${CLAWD_CSS}`;
     if (step) c.idleMood = step.kind === 'done' || step.kind === 'error' ? step.kind : 'idle';
     if (!c.queue.length && c.endAfterQueue) {
       c.leaving = true;
-      setLabel(c, c.idleMood === 'error' ? '' : 'Bye! 👋');
+      setLabel(c, c.idleMood === 'error' ? '' : 'Bye!');
     } else if (!c.queue.length) {
       setLabel(c, '');
     }
@@ -732,10 +755,14 @@ ${CLAWD_CSS}`;
       if (cur && now > cur.endAt) finishStep(c);
       else if (cur) {
         c.lastWork = now;
-        const mood = cur.kind === 'paint' && !cur.rect ? 'canvas' : cur.kind;
+        const mood = cur.hold ? heldMood(c, cur, now) : cur.kind === 'paint' && !cur.rect ? 'canvas' : cur.kind;
         show(c, mood, now);
         const snd = ACTION_SOUNDS[mood];
-        if (snd && now > (c.nextSfx || 0)) { sfx(snd[0]); c.nextSfx = now + snd[1]; }
+        if (snd && now > (c.nextSfx || 0) && !cur.rung) {
+          sfx(snd[0]);
+          c.nextSfx = now + snd[1];
+          if (mood === 'wave') cur.rung = true; // the reminder dings once, not on repeat
+        }
       } else {
         idle(c, now);
       }
@@ -751,11 +778,8 @@ ${CLAWD_CSS}`;
     if (!c.nextWater) c.nextWater = now + 9000 + Math.random() * 9000;
     if (busy && now > c.nextWater && !c.waterUntil && !c.throwUntil) {
       c.waterUntil = now + 3000; // matches the one-shot drinking animation
-      c.litres += 0.5;
       [700, 1150, 1600, 2050].forEach(t => setTimeout(() => c.waterUntil && sfx('glug'), t));
       setTimeout(() => c.waterUntil && sfx('ahh'), 2750);
-      c.waterEl.textContent = `💧 ${c.litres.toFixed(1)} L`;
-      c.waterEl.classList.add('on');
       setLabel(c, MOOD_LABEL.water);
     }
     if (c.waterUntil && now > c.waterUntil) {
@@ -767,12 +791,147 @@ ${CLAWD_CSS}`;
       c.throwUntil = 0;
       const hand = handPos(c);
       const aim = mouse || { x: hand.x + hand.dir * 260, y: hand.y - 220 };
-      tossBottle(document, layer, hand.x, hand.y, aim.x, aim.y);
+      tossBottle(document, layer, hand.x, hand.y, aim.x, aim.y, mouse && {
+        cursor: () => mouse,
+        onHit: () => sfx('dink'),
+        onMiss: () => {
+          if (!clawds.has(c.id) || c.cur) return; // busy again: let it go
+          c.missUntil = performance.now() + 2200;
+          setLabel(c, DODGED[Math.floor(Math.random() * DODGED.length)]);
+          sfx('sniffle');
+        },
+      });
       sfx('whoosh');
-      c.waterEl.classList.remove('on');
       setLabel(c, '');
     }
-    show(c, c.waterUntil ? 'water' : c.throwUntil ? 'throw' : c.idleMood, now);
+    // You dodged the bottle: a moment of moping.
+    const sulking = c.missUntil > now;
+    if (c.missUntil && !sulking) { c.missUntil = 0; setLabel(c, ''); }
+    // Quiet for a while mid-session: Claude's thinking, so he works at the chalkboard.
+    const ponder = busy && now - c.lastWork > PONDER_AFTER && !c.waterUntil && !c.throwUntil && !sulking;
+    if (ponder && !c.pondering) setLabel(c, MOOD_LABEL.ponder);
+    c.pondering = ponder;
+    if (ponder && now > (c.nextSfx || 0)) { sfx('scribble'); c.nextSfx = now + 1700; }
+    show(c, c.waterUntil ? 'water' : c.throwUntil ? 'throw' : sulking ? 'sad' : ponder ? 'ponder' : c.idleMood, now);
+  }
+
+  /**
+   * A tool that's still running: its own animation at first; a long one has him sit
+   * down with a book or some knitting, and a very long one nod off. A long think goes to
+   * the chalkboard instead.
+   */
+  function heldMood(c, step, now) {
+    const t = now - step.arrivedAt;
+    let mood = step.kind;
+    if (step.kind === 'think') {
+      if (t > PONDER_AFTER) mood = 'ponder';
+    } else if (step.kind !== 'compact') {
+      if (t > DOZE_AFTER) mood = 'doze';
+      else if (t > SIT_AFTER) mood = step.sit || (step.sit = Math.random() < 0.5 ? 'wait' : 'knit');
+    }
+    if (mood === 'doze' && !step.dozing) { step.dozing = true; sfx('yawn'); c.nextSfx = now + 3000; }
+    return mood;
+  }
+
+  /** Stop holding a step: it gets its normal minimum time, or ends now if it's had that. */
+  function release(c, step, now) {
+    if (!step || !step.hold) return;
+    step.hold = false;
+    if (step.arrivedAt) {
+      step.endAt = Math.min(step.endAt, Math.max(now, step.arrivedAt + GUESS_MS));
+      if (step.dozing) { c.noticeUntil = now + 350; sfx('boop'); } // woken with a start
+    } else {
+      step.ms = GUESS_MS;
+    }
+  }
+
+  /** Which tools have ended (an 'end' can beat its own 'act' here). */
+  const ended = new Map();
+
+  /** A tool finished: stop holding its step, and react if it was a task like the tests. */
+  function endTool(c, msg) {
+    const now = performance.now();
+    ended.set(msg.toolId, now);
+    if (ended.size > 60) ended.delete(ended.keys().next().value);
+    const all = [c.cur, ...c.queue];
+    const step = all.find(x => x && x.toolId === msg.toolId && x.hold);
+    if (!step) return;
+    release(c, step, now);
+    const said = TASK_RESULT[step.task];
+    if (!said || msg.interrupted) return;
+    const react = {
+      kind: msg.ok ? 'cheer' : 'facepalm', say: said[msg.ok ? 0 : 1], ms: REACT_MS,
+      guess: true, react: true, id: ++stepSeq,
+    };
+    const at = c.queue.indexOf(step);
+    c.queue.splice(at + 1, 0, react); // right after it (at -1: it's the current one)
+  }
+
+  /** A mini Clawd of the same colour, for a subagent. */
+  function makeMini(c, label) {
+    const node = el('div', 'mini', layer);
+    node.style.setProperty('--clawd', c.color || '#d97757');
+    const turn = el('div', 'turn', node);
+    const svg = clawdSpriteNode(document, MINI_W);
+    turn.appendChild(svg);
+    el('div', 'minitag', node, label || '');
+    return { node, turn, svg };
+  }
+
+  const MINI_FEET = (10 - VIEWBOX.y) * MINI_W / VIEWBOX.w;
+
+  /** Walk a mini from where it is to (x, y) — its feet — then call `done`. */
+  function walkMini(h, x, y, mood, done) {
+    const from = h.at || { x, y };
+    const dist = Math.hypot(x - from.x, y - from.y);
+    const secs = Math.max(0.3, dist / MINI_SPEED);
+    h.turn.classList.toggle('flip', x < from.x);
+    setMood(h.svg, mood);
+    h.node.style.transitionDuration = '0s';
+    h.node.style.transform = `translate(${Math.round(from.x - MINI_W / 2)}px, ${Math.round(from.y - MINI_FEET)}px)`;
+    void h.node.offsetWidth; // start from there
+    h.node.style.transitionDuration = `${secs}s`;
+    h.node.style.transform = `translate(${Math.round(x - MINI_W / 2)}px, ${Math.round(y - MINI_FEET)}px)`;
+    h.at = { x, y };
+    clearTimeout(h.timer);
+    h.timer = setTimeout(done, secs * 1000 + 30);
+  }
+
+  /** A subagent starts (a mini Clawd heads off-screen) or finishes (it brings the results back). */
+  function helper(c, msg) {
+    const key = String(msg.agentId || '');
+    const { w } = vp();
+    // Where Clawd's feet are (or will be), and the nearer side of the screen to exit by.
+    const home = c.pos ? { x: c.pos.x + FOOT_X, y: c.pos.y + FOOT_Y } : (() => {
+      const d = destination(c);
+      return { x: d.x + FOOT_X, y: d.y + FOOT_Y };
+    })();
+    const edge = home.x < w / 2 ? -MINI_W : w + MINI_W;
+    if (msg.on) {
+      if (c.helpers.has(key)) return;
+      const h = makeMini(c, msg.label);
+      c.helpers.set(key, h);
+      h.at = { x: home.x + (edge < 0 ? -40 : 40), y: home.y };
+      sfx('pop');
+      walkMini(h, edge, home.y, 'walk', () => { h.node.style.visibility = 'hidden'; });
+      return;
+    }
+    let h = c.helpers.get(key);
+    if (!h) {
+      h = makeMini(c, msg.label);
+      c.helpers.set(key, h);
+    }
+    h.node.style.visibility = '';
+    h.at = { x: edge, y: home.y };
+    // Back with the results: parcel overhead, then a happy hop, then gone.
+    walkMini(h, home.x + (edge < 0 ? -44 : 44), home.y, 'fetch', () => {
+      setMood(h.svg, 'done');
+      sfx('chime');
+      h.timer = setTimeout(() => {
+        h.node.classList.add('gone');
+        setTimeout(() => { h.node.remove(); c.helpers.delete(key); }, 450);
+      }, 1300);
+    });
   }
 
   function tick(now) {
@@ -943,14 +1102,23 @@ ${CLAWD_CSS}`;
     const s = {
       kind: a.kind, say: a.label || '', ms: GUESS_MS, color: a.color, measure: a.measure,
       selectors: a.selectors, components: a.components, pattern: a.pattern, sign: a.sign, guess: true, id: ++stepSeq,
+      toolId: a.toolId, task: a.task,
     };
+    // Running until its tool ends (unless that already happened).
+    // (An end only ever beats its own start by moments; 'compact' comes round again.)
+    if (a.hold && a.toolId && !(performance.now() - (ended.get(a.toolId) || -1e9) < 30000)) {
+      s.hold = true;
+      s.ms = HOLD_MS;
+    }
     if (a.kind === 'wave') {
       // Needing the user beats everything: straight to the front.
       const sign = c.svg.querySelector('.cw-p-ask text');
       if (sign) sign.textContent = a.sign || '!?';
       s.ms = 600000;
-      c.queue = [s, ...c.queue.filter(x => x.kind !== 'wave')];
-      if (c.cur) c.cur.endAt = 0;
+      // A tool still running (usually: waiting on this very permission) resumes after.
+      const resume = c.cur && c.cur.hold ? [{ ...c.cur, arrivedAt: 0, endAt: 0, dozing: false, sit: null }] : [];
+      c.queue = [s, ...resume, ...c.queue.filter(x => x.kind !== 'wave')];
+      if (c.cur) { c.cur.hold = false; c.cur.endAt = 0; }
       c.leaving = false;
       c.endAfterQueue = null;
       return;
@@ -958,20 +1126,67 @@ ${CLAWD_CSS}`;
     if (busyWithClaude) return;
     c.leaving = false;
     c.endAfterQueue = null;
-    // Keep the guess currently showing for its minimum time; replace any waiting.
-    c.queue = c.queue.filter(x => !x.guess);
+    // Something new started, so whatever was being held is over.
+    const now = performance.now();
+    for (const st of [c.cur, ...c.queue]) if (st && st.guess) release(c, st, now);
+    // Keep the guess currently showing for its minimum time; replace any waiting (but
+    // not a reaction to how a task went).
+    c.queue = c.queue.filter(x => !x.guess || x.react);
     c.queue.push(s);
   }
 
   function finish(c, ok) {
+    const now = performance.now();
+    for (const st of [c.cur, ...c.queue]) release(c, st, now);
     c.queue = c.queue.filter(x => x.kind !== 'wave');
     if (c.cur && c.cur.kind === 'wave') c.cur.endAt = 0;
     c.queue.push({ kind: ok ? 'done' : 'error', say: MOOD_LABEL[ok ? 'done' : 'error'], ms: ok ? 3000 : 4000, id: ++stepSeq, target: {} });
     c.endAfterQueue = true;
   }
 
+  let peekTimer = 0;
+  let peeked = [];
+  /**
+   * A screenshot can only show what's on screen, so for that instant the bits of Clawd
+   * (sprite, caption, glow) that overlap the spots being photographed get a hole cut in
+   * them; the rest of him stays put. Usually nothing overlaps and nothing changes.
+   */
+  function peek(rects) {
+    unpeek();
+    if (!layer || !Array.isArray(rects) || !rects.length) return;
+    const pad = 2;
+    for (const n of layer.children) {
+      if (n.classList.contains('cover')) continue;
+      const own = n.getBoundingClientRect();
+      // A sprite's caption and name tag hang outside its box.
+      const boxes = [own, ...[...n.querySelectorAll('.label, .tag')].map(x => x.getBoundingClientRect())]
+        .filter(b => b.width && b.height);
+      const hits = rects.filter(r => boxes.some(b => r.left - pad < b.right && r.left + r.width + pad > b.left
+        && r.top - pad < b.bottom && r.top + r.height + pad > b.top));
+      if (!hits.length) continue;
+      const holes = hits.map(r => {
+        const w = r.width + pad * 2;
+        const h = r.height + pad * 2;
+        return `M${r.left - own.left - pad} ${r.top - own.top - pad}h${w}v${h}h${-w}Z`;
+      }).join('');
+      n.style.clipPath = `path(evenodd, "M-9999 -9999H9999V9999H-9999Z${holes}")`;
+      peeked.push(n);
+    }
+    if (peeked.length) peekTimer = setTimeout(unpeek, 1500); // never for long
+  }
+  function unpeek() {
+    clearTimeout(peekTimer);
+    for (const n of peeked) n.style.removeProperty('clip-path');
+    peeked = [];
+  }
+
   window.__cmClawd = msg => {
     if (!msg || msg.op === 'hide') return hideAll();
+    if (msg.op === 'peek') {
+      if (msg.on) peek(msg.rects);
+      else unpeek();
+      return null;
+    }
     const id = String(msg.id || 'job');
     if (msg.op === 'leave') {
       const c = clawds.get(id);
@@ -984,9 +1199,17 @@ ${CLAWD_CSS}`;
       if (c) attachGhosts(c, msg);
       return null;
     }
+    if (msg.op === 'end') {
+      const c = clawds.get(id);
+      if (c) endTool(c, msg);
+      else ended.set(msg.toolId, performance.now());
+      return null;
+    }
+    if (msg.op === 'helper' && !msg.on && !clawds.has(id)) return null; // he's already gone home
     ensureLayer();
     const c = getClawd(id, msg);
     if (msg.op === 'play') return play(c, msg);
+    if (msg.op === 'helper') { helper(c, msg); return null; }
     if (msg.op === 'act') guess(c, msg);
     else if (msg.op === 'done') finish(c, true);
     else if (msg.op === 'error') finish(c, false);

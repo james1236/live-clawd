@@ -72,6 +72,10 @@ const RIGHT = [
     R(15.4, -4, 1.4, 1, '#3a7bd5'), R(15, 0, 2.2, 1, '#ffffff'),
   ]),
   G('cw-prop cw-p-ask', [R(15.6, 1, 0.8, 4.5, WOOD), R(13.8, -4.4, 6, 5, '#fff3c4'), R(13.8, -4.4, 6, 0.6, '#e2b04a'), T(14.9, -0.5, 3.4, '#c0392b', '!?', 'cw-sign-text')]),
+  G('cw-prop cw-p-plane', [
+    ['polygon', { points: '14,1.4 20.4,-0.6 15.6,2.8', fill: PAPER, stroke: '#bdb8ac', 'stroke-width': 0.2, class: 'cw-plane' }],
+  ]),
+  G('cw-prop cw-p-timer', [C(16.2, 2.6, 1.7, '#e0533f'), R(15.8, 0.5, 0.8, 0.6, '#4caf6a'), R(16, 1.2, 0.4, 1.4, PAPER, 'cw-dial')]),
   G('cw-prop cw-p-key', [C(16, 0.5, 1.2, '#e2b04a'), C(16, 0.5, 0.45, '#8a6a1f'), R(15.6, 1.5, 0.8, 3.5, '#e2b04a'), R(16.4, 3.5, 0.8, 0.5, '#e2b04a')]),
 ];
 
@@ -81,6 +85,13 @@ const LEFT = [
     ['ellipse', { cx: -0.7, cy: 4.6, rx: 2.6, ry: 1.7, fill: '#e8cfa0' }],
     C(-2, 4, 0.45, '#e05a4f'), C(-0.8, 3.6, 0.45, '#3d7fd6'), C(0.4, 4.1, 0.45, '#f2c94c'), C(-1.4, 5.3, 0.45, '#4caf6a'),
     C(0.1, 5.4, 0.45, PAINT),
+  ]),
+  G('cw-lprop cw-l-clipboard', [
+    R(-3, 0.5, 4.5, 6, '#a9773f'), R(-2.6, 1.3, 3.7, 4.9, PAPER), R(-1.4, 0.1, 1.4, 0.8, STEEL),
+    ...[0, 1, 2].flatMap(i => [
+      R(-2.2, 2 + i * 1.4, 0.8, 0.8, '#d8d3c6'), R(-1.1, 2.25 + i * 1.4, 1.9, 0.35, INK),
+      R(-2.3, 2.2 + i * 1.4, 0.35, 0.5, '#3a9a52', `cw-chk cw-c${i}`), R(-2, 1.75 + i * 1.4, 0.35, 0.95, '#3a9a52', `cw-chk cw-c${i}`),
+    ]),
   ]),
   G('cw-lprop cw-l-notepad', [R(-2.5, 1.5, 3.5, 4.5, PAPER), R(-2.5, 1.5, 3.5, 0.7, '#e05a4f'), R(-2, 3, 2.5, 0.4, INK), R(-2, 4, 2.5, 0.4, INK)]),
 ];
@@ -104,6 +115,16 @@ const OVERHEAD = [
   G('cw-over cw-o-chest', [R(4.5, -4.5, 7, 4, '#a0672f'), R(4.5, -3.2, 7, 0.5, '#e2b04a'), R(7.5, -3.5, 1, 1.2, '#e2b04a'), R(4.5, -4.5, 7, 0.5, '#7d4f22')]),
 ];
 
+/** Behind Clawd. */
+const CHALK = '#e9efe6';
+const BOARD = G('cw-front cw-b-board', [
+  R(-4.8, -6.8, 25.6, 9.1, WOOD), R(-4.5, -6.5, 25, 8.5, '#2f4f3a'),
+  R(-3.6, 2.3, 0.6, 7.7, WOOD), R(19.6, 2.3, 0.6, 7.7, WOOD),
+  T(-3.6, -3.4, 2.2, CHALK, 'x²+y', 'cw-chalk cw-k0'), R(-3.6, -2.6, 5, 0.25, CHALK, 'cw-chalk cw-k0'),
+  T(3.4, -4.2, 2, CHALK, '∑ n·k', 'cw-chalk cw-k1'), T(4.6, -1.2, 1.8, CHALK, '→ O(n)', 'cw-chalk cw-k2'),
+  T(13, -3.2, 2.4, CHALK, '= ?', 'cw-chalk cw-k3'),
+]);
+
 /** In front of Clawd, on the ground. */
 const FRONT = [
   G('cw-front cw-f-laptop', [
@@ -117,6 +138,35 @@ const FRONT = [
     R(1.8, 8.2, 12.4, 1, '#9aa0a8'),
   ]),
   G('cw-front cw-f-vacuum', [R(16, 6.4, 4.2, 3, '#d9534f'), R(16.5, 5.8, 3.2, 0.7, '#b03a37'), C(16.8, 9.6, 0.6, DARK), C(19.4, 9.6, 0.6, DARK)]),
+  G('cw-front cw-f-bricks', [
+    R(16, 8.6, 2.6, 1.4, '#b5533c'), R(18.8, 8.6, 2.6, 1.4, '#a8492f'),
+    G('cw-row cw-row1', [R(17.4, 7.1, 2.6, 1.4, '#a8492f'), R(16, 7.1, 1.2, 1.4, '#b5533c')]),
+    G('cw-row cw-row2', [R(16.6, 5.6, 2.6, 1.4, '#b5533c')]),
+  ]),
+  G('cw-front cw-f-box', [
+    R(5, 3.6, 1.2, 1.2, '#4caf6a', 'cw-item cw-i0'), R(8.4, 3.4, 1.1, 1.1, '#3d7fd6', 'cw-item cw-i1'), C(11, 4.2, 0.6, '#f2c94c', 'cw-item cw-i2'),
+    R(2.5, 5.5, 11, 4.5, '#c79a62'), R(7.4, 5.5, 1.2, 4.5, '#a77c48'),
+    R(0.8, 4.8, 2.6, 0.9, '#b8894f'), R(12.6, 4.8, 2.6, 0.9, '#b8894f'),
+  ]),
+  G('cw-front cw-f-book', [
+    R(3.6, 7.4, 8.8, 0.6, '#7a4a2a'),
+    R(4, 4.6, 3.8, 3, PAPER), R(8.2, 4.6, 3.8, 3, PAPER), R(7.8, 4.6, 0.4, 3.2, '#7a4a2a'),
+    R(4.5, 5.3, 2.8, 0.3, INK), R(4.5, 6.2, 2.4, 0.3, INK), R(8.7, 5.3, 2.8, 0.3, INK), R(8.7, 6.2, 2.2, 0.3, INK),
+    R(8.2, 4.6, 3.8, 3, '#efe9da', 'cw-page'),
+  ]),
+  G('cw-front cw-f-knit', [
+    ['path', { d: 'M8.2 7 C 11 9.8, 14 10.4, 17 9.4', fill: 'none', stroke: '#e05a8a', 'stroke-width': 0.3 }],
+    C(17.5, 9, 1.3, '#e05a8a', 'cw-yarn'), R(16.9, 8.4, 1.2, 0.3, '#f7c7d8', 'cw-yarn'),
+    G('cw-scarf', [R(6.8, 7, 2.6, 3, '#e05a8a'), R(6.8, 7.8, 2.6, 0.5, '#f7c7d8'), R(6.8, 9, 2.6, 0.5, '#f7c7d8')]),
+    ['line', { x1: 4.4, y1: 5, x2: 9.8, y2: 7.6, stroke: STEEL, 'stroke-width': 0.45, class: 'cw-needle cw-nl' }],
+    ['line', { x1: 11.6, y1: 5, x2: 6.2, y2: 7.6, stroke: STEEL, 'stroke-width': 0.45, class: 'cw-needle cw-nr' }],
+  ]),
+  G('cw-front cw-f-compactor', [
+    R(15.5, 2.5, 6, 7.5, '#7d8590'), R(16.2, 4.6, 4.6, 4.6, '#2b2f36'),
+    G('cw-wad', [R(16.6, 6.8, 3.8, 2.4, PAPER), R(17, 7.4, 3, 0.3, INK), R(17, 8.2, 2.4, 0.3, INK)]),
+    G('cw-piston', [R(18.2, 2.5, 0.6, 2.4, '#5d636b'), R(16.2, 4.6, 4.6, 0.8, STEEL)]),
+    R(14.6, 5, 0.9, 0.9, '#d9534f'),
+  ]),
   G('cw-front cw-f-easel', [R(-4.4, -1, 0.6, 11, WOOD), R(-1.2, -1, 0.6, 11, WOOD), R(-4.8, -1.5, 4.6, 5, PAPER), R(-4.2, 0, 3.2, 1.4, PAINT, 'cw-canvas')]),
 ];
 
@@ -145,6 +195,7 @@ const FX = [
   G('cw-glints', [T(17.5, 0.5, 2.6, '#f2c94c', '✦', 'cw-glint'), T(-3.8, 0.5, 2, '#f2c94c', '✦', 'cw-glint cw-gl2'), T(14, -3.5, 1.8, '#f2c94c', '✦', 'cw-glint cw-gl3')]),
   G('cw-sparks', [T(17.5, -1.5, 2.6, '#f2c94c', '⚡', 'cw-spark'), T(-3.5, 2, 2.2, '#f2c94c', '⚡', 'cw-spark cw-sp2')]),
   G('cw-zap', [C(17, 2.5, 3.2, 'rgba(255,255,230,.9)', 'cw-flashburst')]),
+  G('cw-zzz', [T(13, -0.5, 2.4, '#7a8aa0', 'z', 'cw-z'), T(15, -2.6, 3, '#7a8aa0', 'z', 'cw-z cw-z1'), T(17.2, -5, 3.6, '#7a8aa0', 'Z', 'cw-z cw-z2')]),
 ];
 
 const SPRITE = ['svg', {
@@ -154,7 +205,7 @@ const SPRITE = ['svg', {
   'aria-hidden': 'true',
 }, [
   G('cw-all', [
-    G('cw-backs', [FRONT[2]]),
+    G('cw-backs', [FRONT.find(f => f[1].class.includes('cw-f-easel')), BOARD]),
     G('cw-leg cw-l1', [R(4, 8, 1, 2, BODY)]),
     G('cw-leg cw-l2', [R(6, 8, 1, 2, BODY)]),
     G('cw-leg cw-l3', [R(9, 8, 1, 2, BODY)]),
@@ -162,10 +213,11 @@ const SPRITE = ['svg', {
     G('cw-overs', OVERHEAD),
     R(3, 0, 10, 8, BODY, 'cw-body'),
     G('cw-look', [G('cw-eyes', [R(5, 2, 1, 2, EYE), R(10, 2, 1, 2, EYE)])]),
+    G('cw-mouth', [['ellipse', { cx: 8, cy: 5.6, rx: 1, ry: 0.9, fill: EYE }]]),
     G('cw-hats', HEAD),
     G('cw-arm cw-al', [R(1, 4, 2, 2, BODY), G('cw-lprops', LEFT)]),
     G('cw-arm cw-ar', [R(13, 4, 2, 2, BODY), G('cw-props', RIGHT)]),
-    G('cw-fronts', [FRONT[0], FRONT[1]]),
+    G('cw-fronts', FRONT.filter(f => !f[1].class.includes('cw-f-easel'))),
   ]),
   G('cw-fx', FX),
 ]];
@@ -230,9 +282,13 @@ export const eyeOffset = width => ({ x: (8 - VIEWBOX.x) * width / VIEWBOX.w, y: 
 
 /**
  * Fling an empty water bottle from (x, y) at (tx, ty) — page-fixed coordinates inside
- * `parent` — and let it fly on, spinning, until it falls off the screen.
+ * `parent` — and let it fly on until it falls off the screen. Aimed at the cursor
+ * (`at` given), it flies straight; if `cursor()` is still there when it arrives it
+ * bonks off it (`onHit()`: the dink) and tumbles away spinning, else it sails on past
+ * (`onMiss()`). Aimed at nothing, it spins all the way.
  */
-export function tossBottle(doc, parent, x, y, tx, ty) {
+export function tossBottle(doc, parent, x, y, tx, ty, at) {
+  const { cursor, onHit, onMiss } = at || {};
   const win = doc.defaultView;
   const b = doc.createElement('div');
   const st = b.style;
@@ -250,17 +306,35 @@ export function tossBottle(doc, parent, x, y, tx, ty) {
   let vx = (tx - x) / flight;
   let vy = (ty - y) / flight - g * flight / 2;
   if (!Number.isFinite(vx)) { vx = -300; vy = -600; }
-  const spin = (vx >= 0 ? 1 : -1) * 900; // deg/s
+  let spin = at ? 0 : (vx >= 0 ? 1 : -1) * 900; // deg/s
   let px = x;
   let py = y;
-  let rot = 0;
+  // Flying straight at the cursor: point along the flight path (cap first).
+  let aligned = !!at;
+  let rot = aligned ? Math.atan2(vy, vx) * 180 / Math.PI + 90 : 0;
+  let left = at ? flight : 0; // seconds until it reaches the cursor
   let last = win.performance.now();
   const frame = now => {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
+    if (left > 0 && (left -= dt) <= 0) {
+      const m = cursor && cursor();
+      if (m && Math.hypot(m.x - px, m.y - py) < 40) {
+        // Dink! Bounces back off the cursor and starts spinning.
+        aligned = false;
+        if (onHit) onHit();
+        const dir = vx >= 0 ? -1 : 1;
+        vx = dir * (160 + Math.random() * 120);
+        vy = -Math.abs(vy) * 0.25 - 260;
+        spin = dir * (1000 + Math.random() * 500);
+      } else if (onMiss) {
+        onMiss(); // dodged: it sails on past
+      }
+    }
     vy += g * dt;
     px += vx * dt;
     py += vy * dt;
+    if (aligned) rot = Math.atan2(vy, vx) * 180 / Math.PI + 90;
     rot += spin * dt;
     st.transform = `translate(${px - 5}px, ${py - 11}px) rotate(${rot}deg)`;
     const { innerWidth: w, innerHeight: h } = win;
@@ -296,6 +370,19 @@ const SHOW = {
   throw: ['cw-p-bottle'],
   wave: ['cw-p-ask'],
   canvas: ['cw-f-easel', 'cw-p-brush', 'cw-h-beret'],
+  // long-running work, waiting, results
+  test: ['cw-l-clipboard', 'cw-p-pencil'],
+  compile: ['cw-h-hardhat', 'cw-p-hammer', 'cw-f-bricks'],
+  install: ['cw-f-box'],
+  mail: ['cw-p-plane'],
+  ponder: ['cw-b-board'],
+  wait: ['cw-f-book'],
+  knit: ['cw-f-knit'],
+  doze: ['cw-zzz', 'cw-mouth'],
+  cheer: ['cw-glints'],
+  facepalm: ['cw-sweat'],
+  timer: ['cw-p-timer'],
+  compact: ['cw-f-compactor'],
 };
 const showCss = Object.entries(SHOW)
   .map(([mood, groups]) => `${groups.map(g => `.m-${mood} .${g}`).join(', ')} { display: inline; }`)
@@ -315,7 +402,7 @@ export const CLAWD_CSS = `
 .cw-al { transform-origin: 2px 5px; }
 .cw-ar { transform-origin: 14px 5px; }
 .cw-prop, .cw-lprop, .cw-hat, .cw-over, .cw-front, .cw-bubble, .cw-heart, .cw-sweat,
-.cw-notes, .cw-glugs, .cw-glints, .cw-sparks, .cw-zap, .cw-cloud, .cw-tears { display: none; }
+.cw-notes, .cw-glugs, .cw-glints, .cw-sparks, .cw-zap, .cw-cloud, .cw-tears, .cw-zzz, .cw-mouth { display: none; }
 ${showCss}
 
 @keyframes cw-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-0.5px); } }
@@ -480,6 +567,113 @@ ${showCss}
 .cw-r2 { animation-delay: .25s; } .cw-r3 { animation-delay: .5s; }
 .cw-tear { animation: cw-cry 1.1s ease-in infinite; }
 .cw-t2 { animation-delay: .55s; }
+
+/* running the tests: ticks off a checklist */
+@keyframes cw-chk0 { 0%, 8% { opacity: 0; } 9%, 94% { opacity: 1; } 95%, 100% { opacity: 0; } }
+@keyframes cw-chk1 { 0%, 38% { opacity: 0; } 39%, 94% { opacity: 1; } 95%, 100% { opacity: 0; } }
+@keyframes cw-chk2 { 0%, 68% { opacity: 0; } 69%, 94% { opacity: 1; } 95%, 100% { opacity: 0; } }
+.m-test .cw-c0 { animation: cw-chk0 2.6s steps(1) infinite; }
+.m-test .cw-c1 { animation: cw-chk1 2.6s steps(1) infinite; }
+.m-test .cw-c2 { animation: cw-chk2 2.6s steps(1) infinite; }
+.m-test .cw-al { transform: translateY(-1px); }
+.m-test .cw-ar { animation: cw-tap .26s steps(2) infinite alternate; }
+.m-test .cw-look { animation: none; transform: translate(-1px, 1px); }
+
+/* building the project: hard hat, hammers away while the wall grows */
+@keyframes cw-row1 { 0%, 32% { opacity: 0; } 33%, 100% { opacity: 1; } }
+@keyframes cw-row2 { 0%, 65% { opacity: 0; } 66%, 100% { opacity: 1; } }
+.m-compile .cw-ar { animation: cw-bonk .7s ease-in infinite; }
+.m-compile .cw-all { animation: cw-squash .7s infinite; }
+.m-compile .cw-row1 { animation: cw-row1 2.7s steps(1) infinite; }
+.m-compile .cw-row2 { animation: cw-row2 2.7s steps(1) infinite; }
+.m-compile .cw-look { animation: none; transform: translateX(1px); }
+
+/* installing packages: digs through a parcel, things pop out */
+@keyframes cw-dig { 0% { transform: translateY(1px); } 100% { transform: translateY(-1.5px); } }
+@keyframes cw-popout { 0% { opacity: 0; transform: translateY(2px); } 30% { opacity: 1; } 100% { opacity: 0; transform: translateY(-5px); } }
+.m-install .cw-al { animation: cw-dig .3s steps(2) infinite alternate; }
+.m-install .cw-ar { animation: cw-dig .3s steps(2) -.15s infinite alternate; }
+.m-install .cw-item { animation: cw-popout 1.5s ease-out infinite; }
+.m-install .cw-i1 { animation-delay: .5s; } .m-install .cw-i2 { animation-delay: 1s; }
+.m-install .cw-look { animation: none; transform: translateY(1px); }
+
+/* git push/pull: folds and flings paper planes */
+@keyframes cw-fling { 0%, 50% { transform: rotate(30deg); } 62% { transform: rotate(-70deg); } 100% { transform: rotate(30deg); } }
+@keyframes cw-fly { 0%, 58% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translate(9px, -9px); } }
+.m-mail .cw-ar { animation: cw-fling 1.8s ease-in infinite; }
+.m-mail .cw-plane { animation: cw-fly 1.8s ease-in infinite; }
+.m-mail .cw-look { animation: none; transform: translate(1px, -1px); }
+
+/* thinking hard: paces in front of a chalkboard, hand on chin */
+@keyframes cw-pace { 0%, 100% { transform: translateX(-2px); } 50% { transform: translateX(2px); } }
+@keyframes cw-chalk { 0% { opacity: 0; } 8%, 92% { opacity: 1; } 100% { opacity: 0; } }
+.m-ponder .cw-all { animation: cw-pace 4s ease-in-out infinite; }
+.m-ponder .cw-l1, .m-ponder .cw-l3 { animation: cw-step .5s steps(2) infinite; }
+.m-ponder .cw-l2, .m-ponder .cw-l4 { animation: cw-step .5s steps(2) -.25s infinite; }
+.m-ponder .cw-ar { transform: translate(-4px, 0); }
+/* a hand in front of his own body: a shade darker, or it disappears */
+.m-ponder .cw-ar > rect, .m-facepalm .cw-ar > rect { filter: brightness(.8); }
+.m-ponder .cw-look { animation: none; transform: translate(1px, -1px); }
+.m-ponder .cw-chalk { opacity: 0; animation: cw-chalk 8s steps(1) infinite; }
+.m-ponder .cw-k1 { animation-delay: 1.6s; } .m-ponder .cw-k2 { animation-delay: 3.2s; } .m-ponder .cw-k3 { animation-delay: 4.8s; }
+
+/* a long wait: sits down with a book, or some knitting */
+.cw-leg { transform-origin: 0 10px; }
+.m-wait .cw-all, .m-knit .cw-all { animation: none; transform: translateY(1px); }
+.m-wait .cw-leg, .m-knit .cw-leg, .m-doze .cw-leg { transform: scaleY(.5); }
+.m-wait .cw-arm { transform: translateY(1px); }
+.m-wait .cw-look { animation: cw-scan 2.4s steps(2) infinite; }
+@keyframes cw-pageflip { 0%, 84% { transform: scaleX(1); } 92% { transform: scaleX(0); } 100% { transform: scaleX(-1); } }
+.m-wait .cw-page { transform-origin: 8px 6px; animation: cw-pageflip 5s ease-in-out infinite; }
+@keyframes cw-knitl { 0% { transform: rotate(-7deg); } 100% { transform: rotate(5deg); } }
+@keyframes cw-grow { 0% { transform: scaleY(.3); } 100% { transform: scaleY(1.3); } }
+@keyframes cw-roll { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(.4px); } }
+.m-knit .cw-arm { transform: translateY(.5px); }
+.m-knit .cw-nl { transform-origin: 8px 6.3px; animation: cw-knitl .19s steps(2) infinite alternate; }
+.m-knit .cw-nr { transform-origin: 8px 6.3px; animation: cw-knitl .19s steps(2) -.1s infinite alternate-reverse; }
+.m-knit .cw-scarf { transform-origin: 8px 7px; animation: cw-grow 30s linear infinite; }
+.m-knit .cw-yarn { animation: cw-roll .8s steps(2) infinite; }
+.m-knit .cw-look { animation: none; transform: translateY(1px); }
+
+/* a very long wait: yawns, nods off */
+@keyframes cw-breathe { 0%, 100% { transform: translateY(1px) scale(1, 1); } 50% { transform: translateY(1px) scale(1.03, .97); } }
+@keyframes cw-yawnmouth { 0% { transform: scale(0); } 25%, 45% { transform: scale(1, 1.3); } 60%, 100% { transform: scale(0); } }
+@keyframes cw-zfloat { 0% { opacity: 0; transform: translate(0, 1px); } 20% { opacity: 1; } 100% { opacity: 0; transform: translate(1.5px, -3px); } }
+.m-doze .cw-all { animation: cw-breathe 3.2s ease-in-out infinite; }
+.m-doze .cw-eyes { animation: none; transform: scaleY(.15); }
+.m-doze .cw-look { animation: none; transform: translateY(1px); }
+.m-doze .cw-arm { transform: translateY(1.5px); }
+.m-doze .cw-mouth { transform-origin: 8px 5.6px; animation: cw-yawnmouth 3s ease-in-out forwards; }
+.m-doze .cw-z { animation: cw-zfloat 3s ease-out infinite; animation-delay: 2.4s; opacity: 0; }
+.m-doze .cw-z1 { animation-delay: 3.4s; } .m-doze .cw-z2 { animation-delay: 4.4s; }
+
+/* it worked: fist pump */
+@keyframes cw-pump { 0% { transform: translateY(-2px) rotate(0); } 100% { transform: translateY(-4.5px) rotate(-12deg); } }
+.m-cheer .cw-all { animation: cw-jump .7s ease-in-out infinite; }
+.m-cheer .cw-ar { animation: cw-pump .18s steps(2) infinite alternate; }
+.m-cheer .cw-eyes { animation: none; transform: scaleY(.5); }
+
+/* it didn't: facepalm */
+@keyframes cw-tsk { 0%, 100% { transform: translateY(.6px) rotate(0); } 25% { transform: translateY(.6px) rotate(-3deg); } 75% { transform: translateY(.6px) rotate(3deg); } }
+.m-facepalm .cw-all { animation: cw-tsk .7s ease-in-out 2; }
+.m-facepalm .cw-ar { transform: translate(-4px, -2.5px); }
+.m-facepalm .cw-al { transform: translateY(1px); }
+.m-facepalm .cw-eyes { animation: none; transform: scaleY(.3); }
+.m-facepalm .cw-sweat { display: inline; animation: cw-drip 1.6s ease-in infinite; }
+
+/* background task: winds a kitchen timer */
+@keyframes cw-dialturn { 0% { transform: rotate(0); } 100% { transform: rotate(360deg); } }
+.m-timer .cw-dial { transform-origin: 16.2px 2.6px; animation: cw-dialturn 1.2s steps(12) infinite; }
+.m-timer .cw-ar { transform: translateY(-1.5px); }
+.m-timer .cw-look { animation: none; transform: translateX(1px); }
+
+/* compacting the conversation: the trash compactor squashes it */
+@keyframes cw-press { 0%, 15%, 100% { transform: translateY(0); } 50%, 65% { transform: translateY(2.4px); } }
+@keyframes cw-squish { 0%, 15%, 100% { transform: scaleY(1); } 50%, 65% { transform: scaleY(.35); } }
+.m-compact .cw-piston { animation: cw-press 1.3s ease-in-out infinite; }
+.m-compact .cw-wad { transform-origin: 18px 9.2px; animation: cw-squish 1.3s ease-in-out infinite; }
+.m-compact .cw-ar { animation: cw-type .65s steps(2) infinite alternate; }
+.m-compact .cw-eyes { animation: none; transform: scaleY(.5); }
 
 /* tickled: giggles and wiggles */
 @keyframes cw-giggle { 0%, 100% { transform: rotate(-7deg); } 50% { transform: rotate(7deg) translateY(-.5px); } }

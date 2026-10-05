@@ -234,7 +234,7 @@ Firefox runs on Windows; the bridge, `node` (v24 via nvm) and `claude` run in WS
 `bridge/install.sh` only handles Linux/macOS, so the Windows side is a hand-made shim in
 `C:\Users\James\claudemonkey\`:
 
-- `host.bat`: `wsl.exe -d Ubuntu --exec /home/james/firefox-claudemonkey/bridge/host-launcher.sh %*`
+- `host.bat`: `wsl.exe -d Ubuntu --exec /home/james/clawdify/bridge/host-launcher.sh %*`
 - `claudemonkey.bridge.json`: the native-messaging manifest pointing at `host.bat`, allowing
   `claudemonkey@james.local` (and the old `claudemonkey@local`)
 - registry key `HKCU\Software\Mozilla\NativeMessagingHosts\claudemonkey.bridge` → that JSON
@@ -320,8 +320,10 @@ Purely cosmetic and local. Install/uninstall everything with
 2. **`clawd` MCP tool** (`bridge/clawd-mcp.js`, user scope, allowed via `mcp__clawd`) plus a
    marked block in `~/.claude/CLAUDE.md`: Claude calls it **in the same message as a UI edit,
    before it**, with steps `{target: {component|selector|text|testid, x, y}, action, say,
-   color, ms}`. Returns `off` when Firefox isn't listening (Claude stops calling it). It
-   waits ≤1.2s for the browser's ack (235ms measured with a simulated browser) so Clawd
+   color, ms}`. Returns `off: <why>` when Firefox isn't listening, or (from the
+   bridge's ack) when no dev server for the project is running; Claude then skips it for
+   ~10 UI edits and retries, rather than giving up for the session. A tab that just isn't
+   visible still returns `ok`. It waits ≤1.2s for the browser's ack (235ms measured with a simulated browser) so Clawd
    starts before hot reload. Measured in a real run on a copy of microEDA: batched with
    the edit, sensible targets/actions, never mentioned in reply/code; costs ~500 tokens of
    cached context per request, ~100 output tokens per UI edit, and **one `ToolSearch` turn
@@ -362,6 +364,31 @@ background page's autoplay behaviour is unverified).
 content, or uncaught errors in the last 4s; live Clawds then mope (rain cloud, tears,
 sniffles, "Oh no… the build broke"), pausing their queue, and say "Phew, fixed!" on recovery
 before carrying on. Verified headless on microEDA with a real Vite error overlay.
+
+**Long-running work** (hooks: also `PostToolUseFailure`, `SubagentStart/Stop`,
+`PreCompact/PostCompact`; run `node bridge/install-hooks.mjs` after pulling). Each
+PreToolUse action is *held* until the PostToolUse with the same `tool_use_id` (cap 10
+min): its own animation, then sitting down with a book or knitting after 20s, a yawn and Zzz after 3 min (woken with a start when it ends).
+Shell commands get their own moods: tests tick a clipboard, builds hammer away by a growing brick wall,
+installs dig through a parcel, git push/pull flings paper planes, background commands
+(`run_in_background`) wind a kitchen timer. Tests, lint, builds, installs and syncs end
+in a fist pump or facepalm: the bridge counts `PostToolUseFailure`, or failure summaries
+at the end of the output (`pnpm test | tail` exits 0), as failed. Thinking for 12s+ (after a
+prompt, or between tools) moves him to a chalkboard. Subagents: a mini Clawd with the
+agent type walks off-screen and comes back with a parcel; a subagent's own tool calls
+are ignored. Compaction runs a trash compactor. The overlay remembers ended tool ids for
+30s, because an `end` (sent straight through) can beat its own paced `act`. During a
+permission reminder a held action is set aside and resumes after it.
+
+**Before-pictures without hiding him:** the screenshot can only show what's on screen,
+so while one is taken (until the next paint has been captured) only the parts of the
+sprite, caption or glow that overlap the photographed spots get a hole cut in them
+(`clip-path`); covers are never touched. Usually nothing overlaps and nothing changes.
+
+**Water bottle:** aimed at the cursor it flies cap-first; if the cursor is still there
+(within 40px) when it arrives it dinks off and tumbles away spinning, and if you dodged
+it sails on past and Clawd mopes for a moment ("Aw, you dodged it…"). With no cursor it
+spins all the way.
 
 > **Gotcha:** the build transpiles `for…of` in loose mode (index loop over `.length`), so
 > never iterate a Map/Set iterator directly: write `for (const c of [...clawds.values()])`.
