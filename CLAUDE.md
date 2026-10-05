@@ -31,22 +31,19 @@ messaging bridge) is gone from the tree; it's kept at the `archive/clawdify-user
 
 ## Releases
 
-`release/` holds what the README links to (raw GitHub URLs, so it must be committed):
-`live-clawd.xpi` (Firefox, signed on AMO as an unlisted add-on) and `live-clawd-chrome.zip`
-(the `extension/dist/chrome` folder, for Load unpacked). After changing the extension:
-bump `extension/package.json`'s version (AMO rejects a version it has signed before),
-`./dev.sh`, then sign:
+`node tools/release.mjs <x.y.z>` does it all: sets the version in `extension/package.json` and
+`plugin/.claude-plugin/plugin.json`, builds, signs the Firefox build on AMO as an unlisted
+add-on (`AMO_JWT_ISSUER`/`AMO_JWT_SECRET` from `~/.config/amo.env`; AMO never signs the same
+version twice), and writes `release/`: `live-clawd-<v>.xpi` + `live-clawd.xpi` (the README's
+link), `updates.json` (signed Firefox installs update themselves from it, via the manifest's
+`update_url`; 0.1.0 had none), `live-clawd-chrome.zip` (a folder, for Load unpacked) and
+`live-clawd-chrome-webstore.zip` (for the Chrome Web Store dashboard). Then commit, push
+(the links are raw GitHub URLs) and upload the Web Store zip.
 
-```sh
-set -a; . ~/.config/amo.env; set +a   # AMO_JWT_ISSUER / AMO_JWT_SECRET
-npx web-ext@10.7.0 sign --channel=unlisted --source-dir extension/dist/firefox \
-  --artifacts-dir /tmp/signed --api-key "$AMO_JWT_ISSUER" --api-secret "$AMO_JWT_SECRET"
-```
-
-and copy the `.xpi` to `release/live-clawd.xpi`; re-zip `dist/chrome` as
-`release/live-clawd-chrome.zip` (top folder `live-clawd-chrome`). Firefox add-on ID:
-`live-clawd@popup-games` (changing it makes a different add-on). Extension author:
-popup-games; plugin/marketplace author: james1236.
+Firefox add-on ID: `live-clawd@popup-games` (changing it makes a different add-on).
+Extension author: popup-games; plugin/marketplace author: james1236. If the messages between
+bridge and extension change, bump `PROTOCOL` in both `plugin/server/bridge.mjs` and
+`extension/src/background.js`: the popup then tells people which side to update.
 
 ## Decisions (and what was rejected)
 

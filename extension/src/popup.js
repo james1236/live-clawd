@@ -15,6 +15,12 @@ async function render() {
   $('status').textContent = !st.enabled ? 'Off' : st.connected ? 'Connected to Claude Code' : 'Waiting for Claude Code';
   $('help').hidden = !st.enabled || st.connected;
   $('captureRow').hidden = st.capture;
+  $('outdated').hidden = !st.outdated;
+  $('outdated').textContent = st.outdated === 'extension'
+    ? `The Claude Code plugin (${st.plugin}) is newer than this extension (${st.version}): please update the extension.`
+    : st.outdated === 'plugin'
+      ? `This extension (${st.version}) is newer than the Claude Code plugin (${st.plugin}): run /plugin marketplace update live-clawd, then /reload-plugins.`
+      : '';
 }
 
 (async () => {

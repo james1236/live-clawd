@@ -1,0 +1,12 @@
+{
+  "addons": {
+    "live-clawd@popup-games": {
+      "updates": [
+        {
+          "version": "0.1.1",
+          "update_link": "https://raw.githubusercontent.com/james1236/live-clawd/main/release/live-clawd-0.1.1.xpi"
+        }
+      ]
+    }
+  }
+}

@@ -16,6 +16,10 @@ p { color: var(--muted); margin: 10px 0; }
 button { font: inherit; font-weight: 700; padding: 10px 22px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; cursor: pointer; margin-top: 8px; }
 a { color: var(--muted); font-size: 14px; }
 .done { color: #4fa36b; font-weight: 700; }
+.status { display: inline-block; margin: 6px 0; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--border); font-size: 14px; color: var(--muted); }
+.status.on { color: #4fa36b; border-color: #4fa36b; }
+.plugin { text-align: left; margin: 12px 0; }
+pre { margin: 6px 0; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); font-size: 13px; overflow-x: auto; user-select: all; }
 [hidden] { display: none; }
 </style>
 </head>
@@ -24,6 +28,13 @@ a { color: var(--muted); font-size: 14px; }
   <img src="icons/icon-128.png" alt="">
   <h1>Live Clawd is installed</h1>
   <p>Open your project's localhost page and start Claude Code in that project. Clawd shows up while Claude works.</p>
+  <div class="status" id="status">Checking for Claude Code…</div>
+  <div class="plugin" id="plugin" hidden>
+    <p>He needs the Claude Code plugin too. In Claude Code, run:</p>
+    <pre>/plugin marketplace add james1236/live-clawd
+/plugin install clawd@live-clawd</pre>
+    <p>then start a new session (or <code>/reload-plugins</code>). This page notices when it connects.</p>
+  </div>
   <div class="ask" id="ask">
     <b>One more thing: let Clawd keep changes under wraps.</b>
     <p>With your OK, he snapshots what's about to change, so the new version only appears as

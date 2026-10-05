@@ -1,6 +1,6 @@
 {
   "name": "clawd",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Live Clawd: a pixel mascot acts out what Claude Code is doing on your localhost dev page (with the Live Clawd browser extension).",
   "author": {
     "name": "james1236"

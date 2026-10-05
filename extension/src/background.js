@@ -19,6 +19,8 @@ import { classifyChange, classifyTool, MOOD_LABEL } from './clawd-actions';
 import { playSound } from './clawd-sound';
 
 const BRIDGE = 'ws://127.0.0.1:47215/';
+/** Must match the plugin bridge's PROTOCOL (plugin/server/bridge.mjs). */
+const PROTOCOL = 1;
 const KEY = 'liveClawd';
 const MIN_DWELL_MS = 1800; // a guessed action shows at least this long
 const CLAWD_ORANGE = '#d97757';
@@ -38,6 +40,8 @@ let ws = null;
 let retryMs = 1000;
 let retryTimer = 0;
 let pingTimer = 0;
+/** What the bridge said when we connected: {protocol, plugin}. */
+let bridgeInfo = null;
 /** @type {Map<string, {ports: number[], last: object, at: number, choreoUntil: number}>} session -> state */
 const sessions = new Map();
 /** @type {Map<string, {at: number, timer: *, pending: object[]}>} "tabId|session" -> pacing */
@@ -87,9 +91,11 @@ function connect() {
     let msg;
     try { msg = JSON.parse(e.data); } catch { return; }
     if (msg && msg.type === 'live') onEvent(msg);
+    else if (msg && msg.type === 'hello') bridgeInfo = { protocol: msg.protocol || 1, plugin: msg.plugin || '' };
   };
   ws.onclose = () => {
     ws = null;
+    bridgeInfo = null;
     clearInterval(pingTimer);
     refreshIcons();
     scheduleRetry();
@@ -474,6 +480,11 @@ const commands = {
       enabled: settings.enabled, sound: settings.sound, connected: !!ws && ws.readyState === 1,
       local: !!o, muted: !!o && settings.muted.includes(o.origin),
       capture: await api.permissions.contains(ALL_URLS).catch(() => false),
+      // Plugin and extension out of step: which one needs updating.
+      outdated: !bridgeInfo || bridgeInfo.protocol === PROTOCOL ? ''
+        : bridgeInfo.protocol > PROTOCOL ? 'extension' : 'plugin',
+      plugin: bridgeInfo ? bridgeInfo.plugin : '',
+      version: api.runtime.getManifest().version,
     };
   },
   async LiveSet({ enabled, sound: soundOn, url, muted } = {}) {

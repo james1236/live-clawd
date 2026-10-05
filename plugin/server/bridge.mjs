@@ -15,11 +15,18 @@
  *    which this server never answers.
  *  - The Host header must be the loopback address (no DNS-rebinding tricks).
  */
+import fs from 'node:fs';
 import http from 'node:http';
 import { acceptWebSocket } from './ws.mjs';
 import { relay } from './relay.mjs';
 
 export const PORT = +process.env.CLAWD_PORT || 47215;
+/** Bump when the messages the extension relies on change; the extension warns on a mismatch. */
+export const PROTOCOL = 1;
+let PLUGIN_VERSION = '';
+try {
+  PLUGIN_VERSION = JSON.parse(fs.readFileSync(new URL('../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version;
+} catch { /* unknown */ }
 const HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`, `[::1]:${PORT}`]);
 const EXTENSION_ORIGIN = /^(moz-extension|chrome-extension):\/\/[\w-]+$/;
 const ACK_WAIT_MS = 1200; // how long a `clawd` call waits for the browser to have it
@@ -67,7 +74,7 @@ function onUpgrade(req, socket) {
     if (m && m.type === 'ack' && acks.has(m.ackId)) acks.get(m.ackId)(String(m.status || ''));
   };
   ws.onClose = () => browsers.delete(ws);
-  ws.send(JSON.stringify({ type: 'hello', version: 1 }));
+  ws.send(JSON.stringify({ type: 'hello', protocol: PROTOCOL, plugin: PLUGIN_VERSION }));
 }
 
 function onRequest(req, res) {

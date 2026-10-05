@@ -1,7 +1,7 @@
 {
   "name": "live-clawd-extension",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "popup-games",
   "type": "module",
   "scripts": {
