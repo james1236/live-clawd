@@ -1,68 +1,43 @@
-# ClaudeMonkey
+# Live Clawd
 
-> **ClaudeMonkey** is a fork of [Violentmonkey](https://github.com/violentmonkey/violentmonkey)
-> (MIT, by Gerald). It keeps the full userscript manager but makes the default action a
-> textbox: you describe how you want the current site changed, and a locally-running
-> **Claude Code** instance writes or edits the userscript for that site (using your Claude
-> subscription via a native-messaging bridge — see [`bridge/`](bridge/)). Setup and usage
-> instructions are in [SETUP.md](SETUP.md). All credit for the underlying userscript engine
-> goes to the Violentmonkey authors; the original README follows.
->
-> The `local` branch is **Clawdify**: a rebranded ClaudeMonkey with an animated Clawd mascot,
-> approval-gated browser tools, and *Live Clawd* for Claude Code sessions on localhost dev
-> servers — see [SETUP.md → Clawdify](SETUP.md#clawdify-this-fork).
+A pixel mascot who acts out what Claude Code is doing, right on the localhost dev page you
+have open. When Claude edits your UI he walks to the element and paints it, vacuums it up,
+rubs it out or rebuilds it as the change lands; he runs your tests, hammers away at builds,
+forks baby helpers for subagents, drinks water, sulks when the page breaks, and waves when
+Claude needs you.
 
----
+Two pieces, nothing else to install:
 
-# Violentmonkey
+1. **The Claude Code plugin** (hooks + the `clawd` tool):
 
-[![Chrome Web Store](https://img.shields.io/chrome-web-store/v/jinjaccalgkegednnccohejagnlnfdag.svg)](https://chrome.google.com/webstore/detail/violentmonkey/jinjaccalgkegednnccohejagnlnfdag)
-[![Firefox Add-ons](https://img.shields.io/amo/v/violentmonkey.svg)](https://addons.mozilla.org/firefox/addon/violentmonkey)
-[![Microsoft Edge Add-on](https://img.shields.io/badge/dynamic/json?label=microsoft%20edge%20add-on&query=%24.version&url=https%3A%2F%2Fmicrosoftedge.microsoft.com%2Faddons%2Fgetproductdetailsbycrxid%2Feeagobfjdenkkddmbclomhiblgggliao)](https://microsoftedge.microsoft.com/addons/detail/eeagobfjdenkkddmbclomhiblgggliao)
+   ```
+   /plugin marketplace add james1236/live-clawd
+   /plugin install clawd@live-clawd
+   ```
 
-Violentmonkey provides userscripts support for browsers.
-It works on browsers with [WebExtensions](https://developer.mozilla.org/en-US/Add-ons/WebExtensions) support.
+2. **The browser extension** for Firefox or Chrome (from the store, or build it: `./dev.sh`,
+   then load `extension/dist/firefox` in `about:debugging` or `extension/dist/chrome` as an
+   unpacked extension).
 
-More details can be found [here](https://violentmonkey.github.io/).
+Then open your project's dev server (`http://localhost:<port>`) and start a Claude Code
+session in that project. Clawd shows up on the page while Claude works.
 
-Join our Discord server:
+## How it works
 
-[![Discord](https://img.shields.io/discord/995346102003965952?label=discord&logo=discord&logoColor=white&style=for-the-badge)](https://discord.gg/XHtUNSm6Xc)
+The plugin's hooks and its `clawd` MCP server talk to a small bridge on `127.0.0.1:47215`
+(run by your Claude sessions themselves); the extension connects to it. It finds which tab
+to use by matching the dev servers running from your project's directory to the localhost
+tabs you have open, so it works under WSL too. Projects whose dev server it can't spot
+(Docker, another directory) can be listed in `~/.config/live-clawd/config.json`:
 
-## Workflows
-
-### Development
-
-Install [Node.js](https://nodejs.org/) and PNPM.
-The version of Node.js should match `"node"` key in `package.json`.
-
-``` sh
-# Install dependencies
-$ pnpm i
-
-# Watch and compile
-$ pnpm dev
+```json
+{ "projects": { "~/my-app": ["http://localhost:3000"] }, "ignore": ["~/scratch"] }
 ```
 
-Then load the extension from 'dist/'.
+Only extension pages can connect to the bridge and only local programs can post to it, so
+websites you visit can't watch your sessions. The extension's only standing permission is
+your localhost pages; the optional "before-pictures" permission (capturing the visible tab)
+lets him keep a change hidden until he reveals it.
 
-### Test + lint
-
-``` sh
-$ pnpm run ci
-```
-
-### Build
-
-``` sh
-# Build for normal releases
-$ pnpm build
-
-# Build for self-hosted release that has an update_url
-$ pnpm build:selfHosted
-```
-
-## Related Projects
-
-- [Violentmonkey for Opera Presto](https://github.com/violentmonkey/violentmonkey-oex)
-- [Violentmonkey for Maxthon](https://github.com/violentmonkey/violentmonkey-mx)
+Turn it off for one session with `CLAWD_LIVE=0`, for a site from the extension's popup, or
+everywhere with its switch (or keyboard shortcut).

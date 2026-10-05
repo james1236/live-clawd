@@ -1,18 +1,7 @@
-/dist/
-/web-ext-artifacts/
 node_modules/
+/extension/dist/
 *.log
-.eslintcache
-/stats.json
-/tmp/
-/dist-assets/
-.eslintcache
 .env
-.pnpm-store
 
-# ClaudeMonkey: machine-specific bridge config + generated launcher
-bridge/config.json
-bridge/host-launcher.sh
-
-# Clawd replay recordings (bridge/clawd-record.mjs): local only, never committed
+# Live Clawd recordings (tools/clawd-record.mjs): local only, never committed
 /replays/

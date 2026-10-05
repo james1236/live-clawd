@@ -1,0 +1,14 @@
+{
+  "name": "live-clawd",
+  "owner": {
+    "name": "james1236"
+  },
+  "description": "Live Clawd: a pixel mascot that acts out your Claude Code sessions on your localhost dev page.",
+  "plugins": [
+    {
+      "name": "clawd",
+      "source": "./plugin",
+      "description": "A pixel mascot acts out what Claude Code is doing on your localhost dev page (needs the Live Clawd browser extension)."
+    }
+  ]
+}
