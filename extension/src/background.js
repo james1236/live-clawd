@@ -21,7 +21,10 @@ import { playSound } from './clawd-sound';
 const BRIDGE = 'ws://127.0.0.1:47215/';
 const KEY = 'liveClawd';
 const MIN_DWELL_MS = 1800; // a guessed action shows at least this long
-const COLORS = ['#d97757', '#5b8fd9', '#4fa36b', '#a777d6', '#d9a13b', '#d0607e', '#3fa8a8', '#8a8f3c'];
+const CLAWD_ORANGE = '#d97757';
+/** Only to tell sessions apart (see `manyAtOnce`); otherwise he's his usual orange. */
+const COLORS = [CLAWD_ORANGE, '#5b8fd9', '#4fa36b', '#a777d6', '#d9a13b', '#d0607e', '#3fa8a8', '#8a8f3c'];
+const ACTIVE_MS = 15 * 60000; // a session that's sent nothing for this long no longer counts
 /** `clawd` tool actions -> overlay moods */
 const ACTION_KIND = { vacuum: 'remove' };
 const RECENT_MS = 90000; // re-show a session's Clawd on tab switch/reload within this
@@ -118,8 +121,33 @@ function ack(ev, status = '') {
 // ---------------------------------------------------------------------------------------
 // Events -> Clawd
 // ---------------------------------------------------------------------------------------
+/** Sessions seen lately and their dev-server ports (for picking colours). */
+const recent = new Map(); // session -> {ports, at}
+let many = false;
+
+/**
+ * Are several Claude sessions working on different dev pages that are open here? Only
+ * then does each Clawd get his own colour; one at a time, he's always orange.
+ */
+async function manyAtOnce() {
+  const now = Date.now();
+  const open = new Set();
+  for (const t of await api.tabs.query({}).catch(() => [])) {
+    const o = originOf(t.url);
+    if (o) open.add(o.port);
+  }
+  const pages = new Set();
+  for (const [session, s] of [...recent]) {
+    if (now - s.at > ACTIVE_MS) { recent.delete(session); continue; }
+    const mine = s.ports.filter(p => open.has(p)).sort().join(',');
+    if (mine) pages.add(mine);
+  }
+  return pages.size > 1;
+}
+
 /** Same colour for the same tmux window everywhere; else stable per session. */
 function colorFor(win, session) {
+  if (!many) return CLAWD_ORANGE;
   if (/^\d+$/.test(win || '')) return COLORS[+win % COLORS.length];
   let h = 0;
   for (const ch of String(session)) h = (h * 31 + ch.charCodeAt(0)) | 0;
@@ -208,6 +236,9 @@ async function targetTabs(ports) {
 
 async function onEvent(ev) {
   await ready;
+  if (ev.event === 'SessionEnd') recent.delete(ev.session);
+  else recent.set(ev.session, { ports: ev.ports || [], at: Date.now() });
+  many = await manyAtOnce();
   if (ev.ports && ev.ports.some(p => !knownPorts.has(p))) {
     ev.ports.forEach(p => knownPorts.add(p));
     refreshIcons();
