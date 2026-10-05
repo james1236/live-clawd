@@ -14,6 +14,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(here, 'package.json'), 'utf8'))
 const watch = process.argv.includes('--watch');
 
 const NAME = 'Live Clawd';
+const AUTHOR = 'popup-games'; // (Chrome's manifest only takes an author email; the Web Store shows the publisher)
 const DESCRIPTION = 'A pixel mascot acts out what Claude Code is doing, right on your localhost dev page.';
 const LOCAL = ['http://localhost/*', 'http://127.0.0.1/*', 'http://[::1]/*', 'https://localhost/*', 'https://127.0.0.1/*'];
 const ICONS = { 16: 'icons/icon-16.png', 32: 'icons/icon-32.png', 48: 'icons/icon-48.png', 128: 'icons/icon-128.png' };
@@ -28,6 +29,8 @@ const manifests = {
     version: pkg.version,
     description: DESCRIPTION,
     icons: ICONS,
+    author: AUTHOR,
+    developer: { name: AUTHOR },
     browser_specific_settings: { gecko: { id: 'live-clawd@james.local', strict_min_version: '115.0' } },
     background: { scripts: ['background.js'], persistent: true },
     browser_action: { default_popup: 'popup.html', default_icon: ASLEEP, default_title: NAME },

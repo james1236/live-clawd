@@ -2,6 +2,7 @@
   "name": "live-clawd-extension",
   "private": true,
   "version": "0.1.0",
+  "author": "popup-games",
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
