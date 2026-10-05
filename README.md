@@ -16,9 +16,10 @@ it's doing, right on the web app you're building.
 
 2. Install the browser extension:
    - **Firefox:** open [live-clawd.xpi](https://github.com/james1236/live-clawd/raw/main/release/live-clawd.xpi) (signed) and confirm.
-   - **Chrome:** download [live-clawd-chrome.zip](https://github.com/james1236/live-clawd/raw/main/release/live-clawd-chrome.zip) and unzip it,
-     then in `chrome://extensions` turn on Developer mode, click Load unpacked and pick the
-     `live-clawd-chrome` folder.
+   - **Chrome** (and Edge, Brave, Arc): [add it from the Chrome Web Store](https://chromewebstore.google.com/detail/fkhlfeneiikmcfhnmanfnfechbdjeabp).
+     If that link doesn't work yet, download [live-clawd-chrome.zip](https://github.com/james1236/live-clawd/raw/main/release/live-clawd-chrome.zip),
+     unzip it, and in `chrome://extensions` turn on Developer mode, click Load unpacked and
+     pick the `live-clawd-chrome` folder.
 
 Needs Node.js and git. Works on Linux, macOS and WSL.
 
