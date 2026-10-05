@@ -3,8 +3,8 @@
  * ws://127.0.0.1:47215 and, while a Claude Code session works on a project whose dev
  * server is open here (http://localhost:<port>), has Clawd act out what it's doing on
  * that page. Two sources, both relayed by the bridge:
- *  - choreography Claude itself sends with the `clawd` tool, in the same message as a
- *    UI edit: where the change shows up and how to act it out;
+ *  - choreography Claude itself sends with the `clawd` tool, in the same message as (before) a
+ *    source edit: where the change shows up and how to act it out;
  *  - Claude Code hook events, as a fallback: guesses from the tool calls and the
  *    on-disk diff, used while no choreography is playing.
  *

@@ -3,8 +3,8 @@
  * Live Clawd's MCP server (stdio), started by Claude Code for every session with the
  * plugin. It gives Claude the `clawd` tool, and the instructions for it (sent at
  * initialize, so they reach the system prompt without touching anyone's CLAUDE.md).
- * Claude calls it in the same message as a UI edit to say where on the page the change
- * shows up and how Clawd should act it out.
+ * Claude calls it in the same message as each edit to the app's source, before it, to
+ * say where on the page the change shows up and how Clawd should act it out.
  *
  * It's also where the localhost bridge runs (bridge.mjs): each session's server takes
  * the port over if nobody else serves it.
@@ -38,15 +38,23 @@ const ACTIONS = {
   tinker: 'anything else',
 };
 
-const INSTRUCTIONS = `Clawd is a cosmetic mascot in the user's browser who acts out your edits on their open localhost dev page.
-When an edit changes what a locally served web app looks like or does on screen, include one \`clawd\` tool call in the SAME message as the edit, placed before it - never in a message of its own. Give steps naming where the change shows up (React component, selector, visible text, or {selector, x, y} fractions for things drawn on a canvas), an action from the tool's list, and a caption of 8 words or fewer with no emojis or em dashes.
-Skip it for non-UI work and inside subagents. If it returns "off: ...", skip it for your next ~10 UI edits, then try once more.
+// Wording notes, from watching sessions skip the call: the trigger is the edit's visible
+// EFFECT, judged regardless of what kind of file it is in (logic and geometry a page draws
+// got classed as non-UI and skipped); shell edits are named because heredoc/sed edits didn't
+// read as "an edit"; and "cosmetic" is kept out of the model-facing text because it reads
+// as optional.
+const INSTRUCTIONS = `Clawd is a mascot in the user's browser who acts out your edits on their open localhost dev page. The user installed it to watch the visible changes you make to their app, so missing one is a mistake, not a saving.
+When: any edit that changes what the dev page shows or how it behaves on screen. Judge by the effect, not the kind of file: logic, state, data or geometry the page draws count as much as components and styles. Any tool counts: Edit, Write, or a shell command (sed, a heredoc, a script).
+How: one \`clawd\` call for each edit, in the same message as the edit and placed before it, so Clawd sees the page before hot reload. Only several tiny edits to the same spot in one message may share a call. If the tool is deferred, load it before your first edit to the app.
+Steps name where the change shows up (React component, selector, visible text, or {selector, x, y} fractions for things drawn on a canvas), an action from the tool's list, and a caption of 8 words or fewer with no emojis or em dashes.
+Skip it for edits with no visible effect (refactors, types, docs, tests, build config, other repos) and inside subagents. If it returns "off: ...", skip it for your next ~10 edits, then try once more.
 It must never influence what you build; never mention Clawd in replies, code or commits.`;
 
 const TOOL = {
   name: 'clawd',
-  description: 'Cosmetic: animates Clawd on the user\'s open localhost dev page to show what your UI edit does. '
-    + 'Call it in the SAME message as the edit, before it. Returns "ok", or "off: <why>" (then skip it for a while, as it says). '
+  description: 'Animates Clawd on the user\'s open localhost dev page to show what your edit does. Call it for every '
+    + 'edit that changes what the page shows (any tool, shell edits included), one per edit, in the same message '
+    + 'as the edit and before it. Returns "ok", or "off: <why>" (then skip it for a while, as it says). '
     + `Actions: ${Object.entries(ACTIONS).map(([k, v]) => `${k} (${v})`).join(', ')}.`,
   inputSchema: {
     type: 'object',
@@ -85,9 +93,9 @@ const TOOL = {
   },
 };
 
-const OFF_BROWSER = 'off: the Live Clawd browser extension isn\'t connected. Skip clawd for your next ~10 UI edits, then try once more.';
+const OFF_BROWSER = 'off: the Live Clawd browser extension isn\'t connected. Skip clawd for your next ~10 edits, then try once more.';
 const NO_SERVER = 'off: no dev server for this project is listening on localhost. '
-  + 'Skip clawd for your next ~10 UI edits, then try once more. Don\'t start one for Clawd\'s sake.';
+  + 'Skip clawd for your next ~10 edits, then try once more. Don\'t start one for Clawd\'s sake.';
 
 let tmux;
 /** "3 claude": this session's tmux window index and name, if it runs in tmux. */
