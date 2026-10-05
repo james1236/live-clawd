@@ -25,5 +25,9 @@ async function render() {
   $('sound').onchange = e => ask('LiveSet', { sound: e.target.checked });
   $('muted').onchange = e => ask('LiveSet', { url, muted: e.target.checked });
   // Must be asked from the click itself.
-  $('capture').onclick = async () => { await api.permissions.request({ origins: ['<all_urls>'] }); render(); };
+  $('capture').onclick = async () => {
+    await api.permissions.request({ origins: ['<all_urls>'] });
+    await ask('CaptureAsked');
+    render();
+  };
 })();

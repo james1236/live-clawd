@@ -33,7 +33,7 @@ const ALL_URLS = { origins: ['<all_urls>'] }; // optional: lets him take "before
 const ICON = { 16: 'icons/icon-16.png', 32: 'icons/icon-32.png', 48: 'icons/icon-48.png', 128: 'icons/icon-128.png' };
 const ICON_ASLEEP = Object.fromEntries(Object.entries(ICON).map(([k, v]) => [k, v.replace('.png', '-asleep.png')]));
 
-let settings = { enabled: true, muted: [], sound: true, volume: 0.35 };
+let settings = { enabled: true, muted: [], sound: true, volume: 0.35, captureAsked: false };
 let ws = null;
 let retryMs = 1000;
 let retryTimer = 0;
@@ -501,8 +501,33 @@ api.runtime.onMessage.addListener((msg, sender, respond) => {
   return true; // answering asynchronously
 });
 
+// ---------------------------------------------------------------------------------------
+// Before-pictures need an optional permission, which only a click on one of our pages can
+// grant: a welcome tab asks on install, and a "!" badge keeps asking until it's answered.
+// ---------------------------------------------------------------------------------------
+async function updateBadge() {
+  await ready;
+  const has = await api.permissions.contains(ALL_URLS).catch(() => false);
+  const ask = !has && !settings.captureAsked;
+  action.setBadgeText({ text: ask ? '!' : '' }).catch(() => {});
+  if (ask) action.setBadgeBackgroundColor({ color: CLAWD_ORANGE }).catch(() => {});
+}
+
+commands.CaptureAsked = async () => {
+  settings.captureAsked = true;
+  await save();
+  updateBadge();
+};
+
+api.runtime.onInstalled.addListener(async ({ reason }) => {
+  if (reason !== 'install') return;
+  if (!await api.permissions.contains(ALL_URLS).catch(() => false)) api.tabs.create({ url: 'welcome.html' });
+});
+api.permissions.onAdded?.addListener(updateBadge);
+api.permissions.onRemoved?.addListener(updateBadge);
+
 api.commands?.onCommand.addListener(cmd => {
   if (cmd === 'toggle-live') setEnabled(!settings.enabled);
 });
 
-ready.then(() => { connect(); refreshIcons(); });
+ready.then(() => { connect(); refreshIcons(); updateBadge(); });

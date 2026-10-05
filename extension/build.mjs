@@ -54,8 +54,8 @@ const manifests = {
 };
 
 const ENTRIES = {
-  firefox: ['background', 'overlay', 'popup'],
-  chrome: ['background', 'overlay', 'popup', 'probe', 'offscreen'],
+  firefox: ['background', 'overlay', 'popup', 'welcome'],
+  chrome: ['background', 'overlay', 'popup', 'welcome', 'probe', 'offscreen'],
 };
 
 for (const [browser, manifest] of Object.entries(manifests)) {
@@ -63,7 +63,7 @@ for (const [browser, manifest] of Object.entries(manifests)) {
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(path.join(out, 'icons'), { recursive: true });
   fs.writeFileSync(path.join(out, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-  for (const f of ['popup.html', ...(browser === 'chrome' ? ['offscreen.html'] : [])]) {
+  for (const f of ['popup.html', 'welcome.html', ...(browser === 'chrome' ? ['offscreen.html'] : [])]) {
     fs.copyFileSync(path.join(here, 'static', f), path.join(out, f));
   }
   for (const f of [...Object.values(ICONS), ...Object.values(ASLEEP)]) fs.copyFileSync(path.join(here, f), path.join(out, f));

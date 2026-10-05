@@ -20,6 +20,10 @@ input[type=checkbox]::after { content: ""; position: absolute; top: 2px; left: 2
 input[type=checkbox]:checked { background: var(--accent); }
 input[type=checkbox]:checked::after { left: 16px; }
 button { font: inherit; border: 1px solid var(--border); background: transparent; color: var(--fg); border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+.ask { margin: 10px 12px; padding: 10px 12px; border: 1.5px solid var(--accent); border-radius: 10px; }
+.ask b { display: block; margin-bottom: 2px; }
+.ask small { display: block; color: var(--muted); font-size: 11.5px; margin-bottom: 8px; }
+.ask button { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
 .help { padding: 10px 14px; color: var(--muted); font-size: 12px; }
 .help code { font-size: 11px; }
 </style>
@@ -29,13 +33,14 @@ button { font: inherit; border: 1px solid var(--border); background: transparent
   <img src="icons/icon-48.png" alt="">
   <div><b>Live Clawd</b><div class="status" id="status"></div></div>
 </header>
+<div class="ask" id="captureRow">
+  <b>Let Clawd keep changes under wraps?</b>
+  <small>He snapshots what's about to change, so it only appears as he reveals it. Only the localhost tab he's on; nothing leaves your computer.</small>
+  <button id="capture">Allow before-pictures</button>
+</div>
 <label class="row"><span>Clawd on localhost dev pages</span><input type="checkbox" id="enabled"></label>
 <label class="row" id="muteRow" hidden><span>Mute on this site</span><input type="checkbox" id="muted"></label>
 <label class="row"><span>Sound effects</span><input type="checkbox" id="sound"></label>
-<div class="row" id="captureRow">
-  <span>Before-pictures<small>Changes stay hidden until Clawd reveals them (needs permission to capture tabs)</small></span>
-  <button id="capture">Allow</button>
-</div>
 <div class="help" id="help" hidden>
   Waiting for Claude Code. Install the plugin:<br>
   <code>/plugin marketplace add james1236/live-clawd</code><br>
