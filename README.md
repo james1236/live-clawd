@@ -1,7 +1,9 @@
 # Live Clawd
 
 A pixel mascot who connects to the Claude Code you already have running and acts out what
-it's doing, right on the web app you're building.
+it's doing, right on the web app you're building. He works best when your project's
+changes show up on the page live (a dev server with hot reload, like Vite or Next.js), so
+you see each edit land as he acts it out.
 
 ![Clawd painting a navbar, restyling a page, running tests and forking a helper](docs/demo.gif)
 
@@ -11,6 +13,9 @@ it's doing, right on the web app you're building.
 
    ```
    /plugin marketplace add james1236/live-clawd
+   ```
+
+   ```
    /plugin install clawd@live-clawd
    ```
 
