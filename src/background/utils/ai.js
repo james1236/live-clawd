@@ -473,11 +473,6 @@ addOwnCommands({
     return c == null ? null : c;
   },
 
-  /** Whether a Clawd is currently on that tab's page. */
-  ClawdOnPage({ tabId } = {}) {
-    return onPage.has(tabId);
-  },
-
   AIWatchDelete({ id } = {}) {
     return deleteWatch(String(id));
   },
@@ -623,6 +618,8 @@ async function applyAndObserve(job) {
     dom = (out && out.dom) || '';
     domStyled = (out && out.domStyled) || '';
     screenshot = await captureScreenshot(job.windowId);
+    job.appliedScript = code;
+    playChoreo(job); // only now: he stays out of the DOM and screenshot Claude gets
   } catch (e) {
     errors.push({ type: 'observe', message: String(e) });
   } finally {
@@ -697,10 +694,16 @@ async function finalize(job, res) {
   } else if (job.edited) {
     job.status = 'done';
     job.error = null;
-    // Ensure the converged script is the one actually installed and live.
-    try { await parseScript({ [S_CODE]: job.script || '', url: job.url, reloadTab: true }); } catch { /* leave last-applied */ }
-    // That reload wipes the mascot; bring it back to celebrate on the finished page.
-    waitTabLoaded(job.tabId).then(() => clawd(job, { op: 'done' }));
+    if (job.script !== job.appliedScript) {
+      // Ensure the converged script is the one actually installed and live.
+      try { await parseScript({ [S_CODE]: job.script || '', url: job.url, reloadTab: true }); } catch { /* leave last-applied */ }
+      // That reload wipes the mascot; bring him back to act it out and celebrate.
+      waitTabLoaded(job.tabId).then(() => { playChoreo(job); clawd(job, { op: 'done' }); });
+    } else {
+      // Already live (the last verify pass applied it): don't cut his act short.
+      playChoreo(job);
+      clawd(job, { op: 'done' });
+    }
   } else {
     job.status = 'done';
     job.error = null;
@@ -716,7 +719,7 @@ async function finalize(job, res) {
 // ---------------------------------------------------------------------------
 
 const APPROVAL_MS = 240000; // the bridge gives up at ~270s
-const UNGATED = new Set(['notify', 'watch_list', 'watch_delete']);
+const UNGATED = new Set(['notify', 'watch_list', 'watch_delete', 'clawd']);
 
 /** What the approval card says (and shows) for a tool call. */
 function describeCall(tool, args) {
@@ -782,6 +785,12 @@ async function handleBrowserCall(job, { callId, tool, args = {} }) {
   };
   try {
     if (UNGATED.has(tool)) {
+      if (tool === 'clawd') {
+        // Clawd's choreography for the change Claude is about to make: played once the
+        // script is installed and the page reloaded, so he acts on the changed page.
+        (job.choreo || (job.choreo = [])).push(...choreoSteps(args.steps));
+        return reply('ok');
+      }
       if (tool === 'notify') {
         browser.notifications.create(`clawdify-note-${Date.now()}`, {
           type: 'basic',
@@ -811,6 +820,24 @@ async function handleBrowserCall(job, { callId, tool, args = {} }) {
 // Clawd, the on-page mascot (src/clawd-overlay)
 // ---------------------------------------------------------------------------
 
+/** The `clawd` tool's steps, as the overlay plays them. */
+function choreoSteps(steps) {
+  return (Array.isArray(steps) ? steps.slice(0, 6) : []).map(st => ({
+    target: (st && st.target) || {},
+    kind: st.action === 'vacuum' ? 'remove' : st.action || 'tinker',
+    say: String(st.say || '').slice(0, 80),
+    color: st.color,
+    ms: 2600,
+  }));
+}
+
+/** Play the choreography Claude has sent since the last time, on the (reloaded) page. */
+function playChoreo(job) {
+  if (!job.choreo || !job.choreo.length) return;
+  clawd(job, { op: 'play', id: 'job', steps: job.choreo });
+  job.choreo = [];
+}
+
 /** Queue a message for the job's tab, in order, if it's still showing the job's site. */
 function clawd(job, msg) {
   job._clawdQ = (job._clawdQ || Promise.resolve()).then(async () => {
@@ -831,44 +858,21 @@ export async function clawdNow(tabId, msg) {
     const [res] = await browser.tabs.executeScript(tabId, {
       code: `JSON.stringify(window.__cmClawd ? window.__cmClawd(${JSON.stringify(msg)}) || null : null)`,
     });
-    if (/^(act|play|done|error)$/.test(msg.op)) setPresence(tabId, msg.id || 'job', true);
-    else if (msg.op === 'hide' && msg.final) setPresence(tabId, null, false);
     return res ? JSON.parse(res) : null;
   } catch {
     return null; // restricted page, closed tab, ...
   }
 }
 
-// Which Clawds are on which tab's page. The sidebar hides its own Clawd (he "portals
-// out" into the page) while one is there; the overlay reports when he leaves.
-/** @type {Map<number, Set<string>>} */
-const onPage = new Map();
 const dismissListeners = [];
-
-function setPresence(tabId, id, present) {
-  if (tabId == null) return;
-  const set = onPage.get(tabId) || new Set();
-  const before = set.size > 0;
-  if (id == null) set.clear();
-  else if (present) set.add(id);
-  else set.delete(id);
-  if (set.size) onPage.set(tabId, set); else onPage.delete(tabId);
-  if (before !== set.size > 0) sendCmd('ClawdPresence', { tabId, present: set.size > 0 });
-}
 
 /** Called with (tabId, id) when the user clicks a waving Clawd away. */
 export const onClawdDismissed = fn => dismissListeners.push(fn);
-
-browser.tabs.onUpdated.addListener((tabId, info) => {
-  if (info.status === 'loading') setPresence(tabId, null, false); // the page (and Clawd) is gone
-});
-browser.tabs.onRemoved.addListener(tabId => setPresence(tabId, null, false));
 
 addPublicCommands({
   /** From the overlay: a Clawd finished leaving the page (dismissed = clicked away). */
   ClawdGone({ id, dismissed } = {}, src) {
     const tabId = src && src.tab && src.tab.id;
-    setPresence(tabId, String(id), false);
     if (dismissed) dismissListeners.forEach(fn => fn(tabId, String(id)));
   },
 });

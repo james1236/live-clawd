@@ -67,6 +67,44 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { filename: { type: 'string' }, content: { type: 'string' } }, required: ['filename', 'content'] },
   },
   {
+    name: 'clawd',
+    description: 'Cosmetic: Clawd, the mascot on the user\'s page, acts out what your userscript change does. Call it in the SAME message as '
+      + 'your edit to userscript.user.js, before it. It plays once the script is installed and the page reloaded, so the change is '
+      + 'visible. No approval needed; returns "ok". Actions: vacuum (removing an element), erase (hiding something), paint (colours), '
+      + 'spray (gradients, filters), polish (borders, radius, shadows), font (typography), write (text content), build (layout, '
+      + 'spacing), measure (sizes), add (a new element), wire (event handlers), hack (network, data, logic), watch (observers, '
+      + 'timers), dance (animations), photo (images, icons), stash (storage), search (investigating), tinker (anything else).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        steps: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 6,
+          items: {
+            type: 'object',
+            properties: {
+              target: {
+                type: 'object',
+                description: 'Where the change shows up: selector (CSS) and/or text (visible text).',
+                properties: { selector: { type: 'string' }, text: { type: 'string' } },
+              },
+              action: {
+                type: 'string',
+                enum: ['vacuum', 'erase', 'paint', 'spray', 'polish', 'font', 'write', 'build', 'measure', 'add', 'wire', 'hack',
+                  'watch', 'dance', 'photo', 'stash', 'search', 'tinker'],
+              },
+              say: { type: 'string', description: 'Caption, 8 words or fewer, no emojis or em dashes.' },
+              color: { type: 'string', description: 'New colour, for paint/spray.' },
+            },
+            required: ['target', 'action', 'say'],
+          },
+        },
+      },
+      required: ['steps'],
+    },
+  },
+  {
     name: 'notify',
     description: 'Show the user a desktop notification. No approval needed.',
     inputSchema: { type: 'object', properties: { title: { type: 'string' }, message: { type: 'string' } }, required: ['message'] },

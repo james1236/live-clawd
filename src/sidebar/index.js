@@ -1,9 +1,8 @@
 /**
  * Clawdify sidebar: the live "Claude is working" view.
  *
- * Clawd stands on a little stage above the composer the whole time, acting out what
- * Claude is doing (the same moods as the on-page overlay), taking water breaks while
- * he works, and hopping when clicked.
+ * Clawd isn't in here: he works on the page itself (src/clawd-overlay), acting out the
+ * job's tool calls and Claude's own `clawd` choreography.
  *
  * Follows the active tab of its window and shows only that site's conversation:
  * your requests, tool-use chips and Claude's narration, then the resulting
@@ -16,10 +15,8 @@
 import '@/common/browser';
 import { sendCmdDirectly } from '@/common';
 import { clawdSvg, esc, injectTheme, siteOf } from '@/common/cm-theme';
-import { CLAWD_CSS, clawdSpriteHtml, eyeOffset, lookAt, setMood, tossBottle } from '@/common/clawd-art';
-import { DODGED, MOOD_LABEL, plainSay } from '@/common/clawd-actions';
 
-injectTheme(`${CLAWD_CSS}
+injectTheme(`
 html, body { height: 100%; }
 body { display: flex; flex-direction: column; user-select: text; }
 .head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--surface); }
@@ -54,15 +51,6 @@ body { display: flex; flex-direction: column; user-select: text; }
 .box:focus-within { border-color: var(--accent); }
 .box .cm-input { flex: 1; min-height: 30px; max-height: 200px; overflow: auto; padding: 6px 4px 6px 8px; border: 0; border-radius: 0; box-shadow: none; background: transparent; line-height: 18px; }
 .send { flex: none; width: 30px; height: 30px; padding: 0; border-radius: 8px; display: grid; place-items: center; }
-.stage { position: relative; display: flex; align-items: flex-end; gap: 10px; padding: 8px 12px 4px; border-top: 1px solid var(--border); background: linear-gradient(var(--bg), var(--surface-2)); }
-.mascot { position: relative; flex: none; width: 112px; height: 82px; cursor: pointer; user-select: none; }
-.mclip { position: absolute; inset: 0 -200px 0 0; overflow: hidden; }
-.mface { position: absolute; left: 0; top: 0; width: 112px; height: 82px; transition: transform .9s linear; }
-/* while he's out on the page he has walked off the stage */
-.mascot.away .mface { transform: translateX(260px); }
-.mascot.away { cursor: default; }
-.speech { position: relative; flex: 0 1 auto; min-width: 0; margin-bottom: 30px; padding: 7px 11px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
-.speech::before { content: ""; position: absolute; left: -6px; bottom: 10px; width: 10px; height: 10px; background: var(--surface); border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); transform: rotate(45deg); }
 .ask { margin: 4px 0 12px; padding: 10px 12px; border-radius: 12px; border: 1.5px solid var(--accent); background: var(--surface); box-shadow: var(--shadow); }
 .ask.done { border-color: var(--border); box-shadow: none; opacity: .8; }
 .ask-h { font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--accent); margin-bottom: 4px; }
@@ -101,10 +89,6 @@ document.body.innerHTML = `
   <div class="banner" id="banner"></div>
   <div class="watches" id="watches"></div>
   <div class="log" id="log"></div>
-  <div class="stage">
-    <div class="mascot" id="mascot" title="Click to tickle"><div class="mclip"><div class="mface">${clawdSpriteHtml(112)}</div></div></div>
-    <div class="speech" id="speech">Hi!</div>
-  </div>
   <div id="result"></div>
   <div class="composer">
     <div class="box">
@@ -127,143 +111,6 @@ let domain = null;
 let tabUrl = '';
 let state = null;
 let codeOpen = false;
-
-// ---------------------------------------------------------------------------
-// Clawd on the stage
-// ---------------------------------------------------------------------------
-
-const mascotEl = $('mascot');
-const spriteEl = mascotEl.querySelector('svg');
-let stageMood = 'idle';
-let stageText = '';
-let busy = false;
-let waterUntil = 0;
-let nextWater = 0;
-let tickleUntil = 0;
-let missUntil = 0;
-let missText = '';
-let tickles = 0;
-let lastTickle = 0;
-let throwUntil = 0;
-let tickleText = '';
-let mouse = null;
-const TICKLES = ['Hehe!', 'Hahaha, stop it!', 'I’m trying to work here!', 'OK OK, you win!'];
-const MASCOT_W = 112;
-const EYES = eyeOffset(MASCOT_W);
-
-const sfx = name => sendCmdDirectly('ClawdSound', { name }).catch(() => {});
-
-function paintStage() {
-  if (mascotEl.classList.contains('moving')) return; // mid-walk
-  const now = Date.now();
-  const drinking = waterUntil > now;
-  const missed = missUntil > now;
-  const mood = drinking ? 'water' : throwUntil > now ? 'throw' : missed ? 'sad' : stageMood;
-  setMood(spriteEl, mood, tickleUntil > now ? 'cw-tickle' : '');
-  $('speech').textContent = away ? `On the page → ${stageText}`
-    : tickleUntil > now ? tickleText : drinking ? MOOD_LABEL.water : missed ? missText : stageText;
-}
-
-function setStage(mood, text, color) {
-  stageMood = mood;
-  stageText = plainSay(text);
-  if (color) mascotEl.style.setProperty('--paint', color);
-  paintStage();
-}
-
-// Click to tickle him.
-mascotEl.addEventListener('click', () => {
-  if (away) return;
-  const now = Date.now();
-  if (now - lastTickle > 3000) tickles = 0;
-  lastTickle = now;
-  tickleText = TICKLES[Math.min(tickles++, TICKLES.length - 1)];
-  tickleUntil = now + 1300;
-  sfx('giggle');
-  paintStage();
-  setTimeout(paintStage, 1350);
-});
-
-// His eyes follow the cursor when it's near.
-let near = false;
-document.addEventListener('mousemove', e => {
-  mouse = { x: e.clientX, y: e.clientY };
-  const r = spriteEl.getBoundingClientRect();
-  const dx = e.clientX - (r.left + EYES.x);
-  const dy = e.clientY - (r.top + EYES.y);
-  const isNear = Math.hypot(dx, dy) < 220;
-  if (isNear) lookAt(spriteEl, dx, dy);
-  else if (near) lookAt(spriteEl, null);
-  near = isNear;
-}, { passive: true });
-document.addEventListener('mouseleave', () => {
-  mouse = null;
-  if (near) { near = false; lookAt(spriteEl, null); }
-});
-
-// Water breaks while working (AI is thirsty work), then the empty bottle gets chucked at you.
-setInterval(() => {
-  const now = Date.now();
-  if (waterUntil && now > waterUntil) {
-    waterUntil = 0;
-    throwUntil = now + 450;
-    paintStage();
-    setTimeout(() => {
-      sfx('whoosh');
-      const r = spriteEl.getBoundingClientRect();
-      const hx = r.left + r.width * 0.78;
-      const hy = r.top + r.height * 0.45;
-      const aim = mouse || { x: hx + 140, y: hy - 160 };
-      tossBottle(document, document.body, hx, hy, aim.x, aim.y, mouse && {
-        cursor: () => mouse,
-        onHit: () => sfx('dink'),
-        onMiss: () => {
-          missUntil = Date.now() + 2200;
-          missText = DODGED[Math.floor(Math.random() * DODGED.length)];
-          sfx('sniffle');
-          paintStage();
-          setTimeout(paintStage, 2250);
-        },
-      });
-      paintStage();
-    }, 450);
-  }
-  if (!busy) { nextWater = 0; return; }
-  if (!nextWater) nextWater = now + 8000 + Math.random() * 8000;
-  if (!waterUntil && !throwUntil && now > nextWater) {
-    waterUntil = now + 3000;
-    nextWater = now + 25000 + Math.random() * 20000;
-    [700, 1150, 1600, 2050].forEach(t => setTimeout(() => waterUntil && sfx('glug'), t));
-    setTimeout(() => waterUntil && sfx('ahh'), 2750);
-    paintStage();
-  }
-  if (throwUntil && now > throwUntil) throwUntil = 0;
-}, 250);
-
-/** Decide what Clawd is doing from the site's state. */
-function stageFor(thread, running, busyHere) {
-  const last = thread[thread.length - 1];
-  if (!domain) return ['idle', 'Open a web page and I’ll remodel it for you!'];
-  if (busyHere && last && last.events.some(ev => ev.type === 'approval' && ev.state === 'pending')) {
-    return ['wave', 'I need your OK below'];
-  }
-  if (busyHere && last) {
-    for (let i = last.events.length - 1; i >= 0; i--) {
-      const ev = last.events[i];
-      if (ev.type === 'tool' && ev.kind) return [ev.kind === 'paint' ? 'canvas' : ev.kind, ev.label || ev.summary, ev.color];
-      if (ev.type === 'note') return ['think', ev.text];
-      if (ev.type === 'narration') return ['think', 'Thinking it over…'];
-    }
-    return ['think', 'Getting started…'];
-  }
-  if (running) return ['walk', `Busy over on ${running.domain}…`];
-  const ago = last && last.endedAt ? Date.now() - last.endedAt : Infinity;
-  if (last && last.status === 'error' && ago < 9000) return ['error', MOOD_LABEL.error];
-  if (last && last.status === 'done' && ago < 7000) return ['done', MOOD_LABEL.done];
-  if (thread.length) return ['idle', `Anything else for ${domain}?`];
-  if (state && state.script) return ['idle', `I’ve already tuned ${domain}. Want more changes?`];
-  return ['idle', `Hi! Tell me how to change ${domain}.`];
-}
 
 /** Group consecutive tool events so a run of Read/Grep calls renders as one chip row. */
 const SIZE = n => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
@@ -354,12 +201,6 @@ function render() {
   } else {
     banner.style.display = 'none';
   }
-
-  // Clawd.
-  busy = !!busyHere;
-  const [mood, text, color] = stageFor(thread, running, busyHere);
-  setStage(mood, text, color);
-  if (mood === 'done' || mood === 'error') setTimeout(refresh, mood === 'done' ? 7200 : 9200);
 
   // Conversation.
   const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
@@ -480,41 +321,10 @@ function refresh() {
 }
 
 // ---------------------------------------------------------------------------
-// Clawd is in one place at a time: when he's out on the page, he walks off the stage.
+// Following the active tab
 // ---------------------------------------------------------------------------
-let tabId = null;
-let away = false;
-let awayTimers = [];
-
-function setAway(on) {
-  if (on === away) return;
-  away = on;
-  const m = mascotEl;
-  awayTimers.forEach(clearTimeout);
-  awayTimers = [];
-  const face = m.querySelector('.mface');
-  // Nobody's looking at the sidebar: just switch, no show.
-  face.style.transition = document.visibilityState === 'visible' ? '' : 'none';
-  m.classList.add('moving');
-  setMood(spriteEl, 'walk');
-  spriteEl.parentNode.style.transform = on ? '' : 'scaleX(-1)'; // walk back in facing left
-  m.classList.toggle('away', on);
-  if (document.visibilityState === 'visible') for (let i = 0; i < 5; i++) setTimeout(() => sfx('step'), i * 170);
-  awayTimers.push(setTimeout(() => {
-    m.classList.remove('moving');
-    spriteEl.parentNode.style.transform = '';
-    paintStage();
-  }, document.visibilityState === 'visible' ? 950 : 0));
-}
-
-async function checkAway() {
-  try { setAway(!!(tabId != null && await sendCmdDirectly('ClawdOnPage', { tabId }))); } catch { /* ignore */ }
-}
-
 async function followTab() {
   const tab = (await browser.tabs.query({ active: true, windowId }))[0];
-  tabId = tab ? tab.id : null;
-  checkAway();
   const next = siteOf(tab && tab.url);
   tabUrl = (tab && tab.url) || '';
   if (next !== domain) {
@@ -527,7 +337,6 @@ async function followTab() {
 
 browser.runtime.onMessage.addListener(msg => {
   if (msg && msg.cmd === 'AIEvent') refresh();
-  else if (msg && msg.cmd === 'ClawdPresence' && msg.data && msg.data.tabId === tabId) setAway(!!msg.data.present);
 });
 browser.tabs.onActivated.addListener(info => {
   if (info.windowId === windowId) followTab();

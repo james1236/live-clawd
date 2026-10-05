@@ -305,8 +305,13 @@ exercised end-to-end in Firefox.
   layer (only Clawd's body takes clicks), attached to `<html>`; hidden before every DOM
   snapshot/screenshot so Claude never sees him. Clawds walk on from the nearer edge and off
   again (portals and the portal gun were tried and removed at the user's request).
-- Only one Clawd at a time: when one is on the page the sidebar's Clawd walks off its
-  stage (`ClawdGone`/`ClawdPresence`, tracked in `ai.js`).
+- Clawd lives only on the page; the sidebar has no mascot (its status line and chat show
+  progress). Clawdify jobs drive him there: guessed actions from the job's tool calls, and
+  the job's own `clawd` tool (in `bridge/mcp-browser.js`, ungated; the job prompt in
+  `host.js` says when to call it). Its steps queue in `job.choreo` and play once the script
+  is installed and the page reloaded, after the DOM and screenshot for Claude are taken;
+  the final "make sure it's installed" reload is skipped when the last verify pass already
+  applied that script, so it can't cut his act short.
 
 ### Live Clawd (Claude Code sessions in WSL → localhost tabs)
 
