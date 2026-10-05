@@ -1,10 +1,9 @@
 /**
- * Clawd, the pixel mascot, as an animatable SVG sprite shared by the sidebar and the
- * in-page overlay. Must stay self-contained (no project globals): the overlay bundle is
+ * Clawd, the pixel mascot, as an animatable SVG sprite for the in-page overlay. Must stay self-contained (no project globals): the overlay bundle is
  * injected into web pages.
  *
  * The sprite is described as data so it can be rendered either to a markup string
- * (sidebar) or straight to DOM nodes (overlay — pages with Trusted Types reject
+ * or straight to DOM nodes (overlay — pages with Trusted Types reject
  * innerHTML). Its mood is a class on the <svg>, `m-<kind>`; kinds are listed in
  * clawd-actions.js plus `idle`, `walk`, `water`, `done` and `error`.
  *

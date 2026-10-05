@@ -249,7 +249,7 @@ ${CLAWD_CSS}`;
     for (const n of [c.root, c.glow, c.box, ...c.ghosts, ...[...c.helpers.values()].map(h => h.node)]) n.remove();
   }
 
-  /** Tell the extension a Clawd has left this page (so the sidebar can have him back). */
+  /** Tell the extension a Clawd has left this page (dismissed: clicked away while waving). */
   function reportGone(c) {
     try {
       if (typeof browser !== 'undefined') {
@@ -1264,7 +1264,7 @@ ${CLAWD_CSS}`;
     }
   }
 
-  /** A guessed action (job events, hook fallbacks): only when Claude isn't choreographing. */
+  /** A guessed action (from the hooks): only when Claude isn't choreographing. */
   function guess(c, a) {
     const busyWithClaude = (c.cur && !c.cur.guess && c.cur.kind !== 'idle') || c.queue.some(s => !s.guess);
     const s = {

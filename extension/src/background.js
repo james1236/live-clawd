@@ -27,6 +27,8 @@ const ACTION_KIND = { vacuum: 'remove' };
 const RECENT_MS = 90000; // re-show a session's Clawd on tab switch/reload within this
 const LOOPBACK = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/;
 const ALL_URLS = { origins: ['<all_urls>'] }; // optional: lets him take "before" pictures
+const ICON = { 16: 'icons/icon-16.png', 32: 'icons/icon-32.png', 48: 'icons/icon-48.png', 128: 'icons/icon-128.png' };
+const ICON_GRAY = Object.fromEntries(Object.entries(ICON).map(([k, v]) => [k, v.replace('.png', '-gray.png')]));
 
 let settings = { enabled: true, muted: [], sound: true, volume: 0.35 };
 let ws = null;
@@ -37,6 +39,8 @@ let pingTimer = 0;
 const sessions = new Map();
 /** @type {Map<string, {at: number, timer: *, pending: object[]}>} "tabId|session" -> pacing */
 const lanes = new Map();
+/** Dev-server ports the bridge has reported for a Claude session (this browser session). */
+const knownPorts = new Set();
 const ready = load();
 
 async function load() {
@@ -72,6 +76,7 @@ function connect() {
   }
   ws.onopen = () => {
     retryMs = 1000;
+    refreshIcons();
     // Pings keep Chrome's service worker alive while connected (and are harmless here).
     pingTimer = setInterval(() => send({ type: 'ping' }), 20000);
   };
@@ -83,6 +88,7 @@ function connect() {
   ws.onclose = () => {
     ws = null;
     clearInterval(pingTimer);
+    refreshIcons();
     scheduleRetry();
   };
 }
@@ -202,6 +208,10 @@ async function targetTabs(ports) {
 
 async function onEvent(ev) {
   await ready;
+  if (ev.ports && ev.ports.some(p => !knownPorts.has(p))) {
+    ev.ports.forEach(p => knownPorts.add(p));
+    refreshIcons();
+  }
   const out = toOverlay(ev);
   if (!out) { ack(ev); return; }
   for (const m of [].concat(out)) await onMessage(ev, m);
@@ -343,7 +353,37 @@ api.tabs.onActivated.addListener(async ({ tabId }) => {
 });
 api.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (info.status === 'complete') replay(tab);
+  if (info.url || info.status === 'complete') setIcon(tab);
 });
+
+// ---------------------------------------------------------------------------------------
+// The toolbar icon: in colour only on a tab Clawd acts on (a localhost dev server of one of
+// your Claude sessions, with Live Clawd on, connected, and not muted there); grey elsewhere.
+// ---------------------------------------------------------------------------------------
+const action = api.action || api.browserAction;
+
+/** Why the icon is grey on this tab, or '' if Clawd acts here. */
+function inactiveReason(url) {
+  const o = originOf(url);
+  if (!settings.enabled) return 'Turned off';
+  if (!o) return 'Not a localhost dev page';
+  if (!ws || ws.readyState !== 1) return 'Waiting for Claude Code';
+  if (settings.muted.includes(o.origin)) return 'Muted on this site';
+  if (!knownPorts.has(o.port)) return 'No Claude session is working on this dev server';
+  return '';
+}
+
+function setIcon(tab) {
+  if (!tab || tab.id == null) return;
+  const why = inactiveReason(tab.url);
+  action.setIcon({ tabId: tab.id, path: why ? ICON_GRAY : ICON }).catch(() => {});
+  action.setTitle({ tabId: tab.id, title: why ? `Live Clawd: ${why.toLowerCase()}` : 'Live Clawd: on this page' }).catch(() => {});
+}
+
+async function refreshIcons() {
+  await ready;
+  for (const t of await api.tabs.query({}).catch(() => [])) setIcon(t);
+}
 api.tabs.onRemoved.addListener(tabId => {
   for (const key of [...lanes.keys()]) if (key.startsWith(`${tabId}|`)) lanes.delete(key);
 });
@@ -373,6 +413,7 @@ async function sound(name) {
 async function setEnabled(enabled) {
   settings.enabled = !!enabled;
   await save();
+  refreshIcons();
   if (settings.enabled) { retryMs = 1000; connect(); } else {
     disconnect();
     for (const t of await api.tabs.query({})) if (originOf(t.url)) clawdNow(t.id, { op: 'hide', final: true });
@@ -417,6 +458,7 @@ const commands = {
       settings.muted = settings.muted.filter(x => x !== o.origin);
       if (muted) settings.muted.push(o.origin);
       await save();
+      refreshIcons();
     }
   },
 };
@@ -432,4 +474,4 @@ api.commands?.onCommand.addListener(cmd => {
   if (cmd === 'toggle-live') setEnabled(!settings.enabled);
 });
 
-ready.then(connect);
+ready.then(() => { connect(); refreshIcons(); });

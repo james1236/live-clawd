@@ -1,7 +1,7 @@
 /**
  * Clawd's sound effects: tiny chiptune bleeps synthesised with Web Audio (no audio
  * files). Played by the background page — which isn't subject to a web page's autoplay
- * rules — for the overlay and the sidebar alike. Self-contained.
+ * rules — for the overlay. Self-contained.
  */
 
 let ctx = null;

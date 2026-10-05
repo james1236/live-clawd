@@ -17,6 +17,8 @@ const NAME = 'Live Clawd';
 const DESCRIPTION = 'A pixel mascot acts out what Claude Code is doing, right on your localhost dev page.';
 const LOCAL = ['http://localhost/*', 'http://127.0.0.1/*', 'http://[::1]/*', 'https://localhost/*', 'https://127.0.0.1/*'];
 const ICONS = { 16: 'icons/icon-16.png', 32: 'icons/icon-32.png', 48: 'icons/icon-48.png', 128: 'icons/icon-128.png' };
+// The toolbar icon is grey by default; the background colours it on the tabs Clawd acts on.
+const GRAY = Object.fromEntries(Object.entries(ICONS).map(([k, v]) => [k, v.replace('.png', '-gray.png')]));
 const COMMANDS = { 'toggle-live': { description: 'Turn Live Clawd on or off' } };
 
 const manifests = {
@@ -28,7 +30,7 @@ const manifests = {
     icons: ICONS,
     browser_specific_settings: { gecko: { id: 'live-clawd@james.local', strict_min_version: '115.0' } },
     background: { scripts: ['background.js'], persistent: true },
-    browser_action: { default_popup: 'popup.html', default_icon: ICONS, default_title: NAME },
+    browser_action: { default_popup: 'popup.html', default_icon: GRAY, default_title: NAME },
     permissions: ['storage', 'scripting', ...LOCAL],
     optional_permissions: ['<all_urls>'],
     commands: COMMANDS,
@@ -40,7 +42,7 @@ const manifests = {
     description: DESCRIPTION,
     icons: ICONS,
     background: { service_worker: 'background.js' },
-    action: { default_popup: 'popup.html', default_icon: ICONS, default_title: NAME },
+    action: { default_popup: 'popup.html', default_icon: GRAY, default_title: NAME },
     permissions: ['storage', 'scripting', 'offscreen'],
     host_permissions: LOCAL,
     optional_host_permissions: ['<all_urls>'],
@@ -61,7 +63,7 @@ for (const [browser, manifest] of Object.entries(manifests)) {
   for (const f of ['popup.html', ...(browser === 'chrome' ? ['offscreen.html'] : [])]) {
     fs.copyFileSync(path.join(here, 'static', f), path.join(out, f));
   }
-  for (const f of Object.values(ICONS)) fs.copyFileSync(path.join(here, f), path.join(out, f));
+  for (const f of [...Object.values(ICONS), ...Object.values(GRAY)]) fs.copyFileSync(path.join(here, f), path.join(out, f));
   const opts = {
     entryPoints: Object.fromEntries(ENTRIES[browser].map(e => [e, path.join(here, 'src', `${e}.js`)])),
     outdir: out,

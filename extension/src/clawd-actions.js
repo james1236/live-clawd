@@ -250,9 +250,7 @@ export function classifyTool(name, detail = '', file = '') {
     return { kind: 'search', selectors: [], pattern: detail.slice(0, 200), label: `${VERB.search} “${detail.slice(0, 28)}”` };
   }
   if (name === 'Read' || name === 'Glob') {
-    if (/userscript/.test(detail)) return { kind: 'think', selectors: [], label: 'Re-reading my script' };
     if (/screenshot/.test(detail)) return { kind: 'photo', selectors: [], label: 'Looking at a screenshot' };
-    if (/assets?\//.test(detail) || /\.(css|js)$/.test(detail)) return { kind: 'read', selectors: [], label: 'Reading the site’s code' };
     return { kind: 'read', selectors: [], label: VERB.read };
   }
   if (name === 'Bash') return { kind: 'fetch', selectors: [], label: 'Fetching something from the web' };

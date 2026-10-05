@@ -4,8 +4,7 @@
 #   C:\Users\<you>\live-clawd\firefox  (override with LIVE_CLAWD_WIN_DIR=/mnt/c/...)
 set -e
 cd "$(dirname "$0")/extension"
-NODE_BIN="$HOME/.nvm/versions/node/v24.21.0/bin"
-[ -d "$NODE_BIN" ] && PATH="$NODE_BIN:$PATH"
+command -v node >/dev/null || { echo "Needs Node (18+) on the PATH"; exit 1; }
 [ -d node_modules ] || npm install --no-audit --no-fund
 node build.mjs
 if [ -d /mnt/c/Users ]; then
