@@ -3,9 +3,13 @@
  * editing, and — Live Clawd — into localhost tabs of a project a Claude Code session in
  * WSL is working on. The background calls `window.__cmClawd(msg)` with:
  *   {op: 'play', id, steps: [{target, kind, say, ms, color}], tag, color, live}
- *       queue a choreography (from Claude's `clawd` tool). Returns {ghosts, dpr}: boxes
- *       of elements about to be removed, which the background snapshots and sends back
- *   {op: 'ghosts', id, ghosts: [{step, rect, src}]}  those snapshots
+ *       queue a choreography (from Claude's `clawd` tool). Returns {ghosts, dpr}: the
+ *       on-screen boxes of the elements it's about to change, which the background
+ *       snapshots *before* the edit lands and sends back
+ *   {op: 'ghosts', id, ghosts: [{step, rect, src}]}  those "before" pictures: each one
+ *       covers its element (hot reload happens unseen underneath) until Clawd gets
+ *       there and his action reveals the new version — a paint wipe, a rub-out, being
+ *       vacuumed up, a crossfade
  *   {op: 'act', id, kind, selectors, components, pattern, label, …}  a guessed action
  *       (Clawdify jobs, hook fallbacks): shown only while no choreography is playing
  *   {op: 'done' | 'error', id}  celebrate / droop after the queue, then walk off
@@ -50,7 +54,7 @@ function install() {
 .fxbox { position: absolute; left: 0; top: 0; overflow: hidden; border-radius: 10px; opacity: 0; transition: opacity .3s; }
 .fxbox.on { opacity: 1; }
 .fx { position: absolute; inset: 0; }
-.ghost { position: absolute; left: 0; top: 0; transform-origin: 0 0; transition: transform 1.1s cubic-bezier(.6, 0, .9, .5), opacity 1.1s ease-in; }
+.cover { position: absolute; left: 0; top: 0; transform-origin: 0 0; clip-path: inset(0 0 0 0); }
 .sprite { position: absolute; left: 0; top: 0; width: ${SPRITE_W}px; height: ${SPRITE_H}px; will-change: transform;
   filter: drop-shadow(0 2px 2px rgba(0,0,0,.25)); }
 .turn { position: absolute; inset: 0; transition: transform .15s; }
@@ -415,7 +419,7 @@ ${CLAWD_CSS}`;
     c.glowRect = lerpRect(c.glowRect, g, 0.22);
     place(c.glow, c.glowRect);
     c.glow.style.borderRadius = pt ? '50%' : '12px';
-    c.glow.classList.toggle('on', !step.gone || !!step.ghostImg);
+    c.glow.classList.toggle('on', !step.gone || !!step.cover);
     // Effects: a patch around his hand (or the spot), inside the target.
     const hx = pt ? pt.x : c.pos.x + FOOT_X + HAND.x;
     const hy = pt ? pt.y : c.pos.y + FOOT_Y - HAND.y;
@@ -494,33 +498,76 @@ ${CLAWD_CSS}`;
     return { x: c.pos.x + (flip ? SPRITE_W - hx : hx), y: c.pos.y + (1 - VIEWBOX.y) * UNIT, dir: flip ? -1 : 1 };
   }
 
-  /** The element vanished (hot reload): leave its picture in place, to be vacuumed up. */
-  function showGhost(c, step) {
-    if (step.ghostImg || !step.ghostSrc || !step.rect) return;
-    const img = el('img', 'ghost');
-    layer.insertBefore(img, layer.firstChild); // under every Clawd
-    img.src = step.ghostSrc;
-    img.style.width = `${step.rect.width}px`;
-    img.style.height = `${step.rect.height}px`;
-    img.style.transform = `translate(${step.rect.left}px, ${step.rect.top}px)`;
-    step.ghostImg = img;
+  const COVER_MAX_MS = 8000; // never hide a real change for longer than this
+
+  /** Lay the "before" picture over its element, under every Clawd. */
+  function showCover(c, step, now) {
+    if (step.cover || !step.coverSrc) return;
+    const img = el('img', 'cover');
+    layer.insertBefore(img, layer.firstChild);
+    img.src = step.coverSrc;
+    img.style.width = `${step.crop.width}px`;
+    img.style.height = `${step.crop.height}px`;
+    step.cover = img;
+    step.coverAt = now;
     c.ghosts.push(img);
+    placeCover(step);
   }
 
-  /** Suck (or rub out) the ghost into his tool. */
-  function consumeGhost(c, step) {
-    const img = step.ghostImg;
-    if (!img || step.consumed) return;
-    step.consumed = true;
+  /** Keep a cover on its element as the page scrolls (until the element is gone). */
+  function placeCover(step) {
+    let x = step.crop.left;
+    let y = step.crop.top;
+    if (step.el && step.el.isConnected) {
+      const r = step.el.getBoundingClientRect();
+      x = r.left + step.cropOff.x;
+      y = r.top + step.cropOff.y;
+      step.crop = { ...step.crop, left: x, top: y };
+    }
+    step.cover.style.transform = `translate(${x}px, ${y}px)`;
+  }
+
+  /** Clawd's action reveals what's under the cover: the new version (or nothing). */
+  function reveal(c, step, how) {
+    const img = step.cover;
+    if (!img || step.revealing) return;
+    step.revealing = true;
+    const dur = Math.round(Math.min(2200, Math.max(700, (step.ms || 2000) * 0.7)));
+    const st = img.style;
     const hand = handPos(c);
-    const r = step.rect;
-    requestAnimationFrame(() => {
-      img.style.transform = step.kind === 'remove'
-        ? `translate(${hand.x}px, ${hand.y}px) scale(.03)`
-        : `translate(${r.left}px, ${r.top}px) scale(1)`;
-      img.style.opacity = '0';
-    });
-    setTimeout(() => { img.remove(); c.ghosts = c.ghosts.filter(x => x !== img); }, 1300);
+    const fromLeft = hand.x < step.crop.left + step.crop.width / 2;
+    switch (how) {
+    case 'suck': // into the vacuum nozzle
+      st.transition = 'transform 1.1s cubic-bezier(.6, 0, .9, .5), opacity 1.1s ease-in';
+      requestAnimationFrame(() => {
+        st.transform = `translate(${hand.x}px, ${hand.y}px) scale(.03)`;
+        st.opacity = '0';
+      });
+      break;
+    case 'wipe': // brushed away, from the side he's painting from
+      st.transition = `clip-path ${dur}ms linear`;
+      requestAnimationFrame(() => { st.clipPath = fromLeft ? 'inset(0 0 0 100%)' : 'inset(0 100% 0 0)'; });
+      break;
+    case 'rub': // rubbed out, in fits and starts
+      st.transition = `opacity ${dur}ms steps(6), filter ${dur}ms linear`;
+      requestAnimationFrame(() => { st.opacity = '0'; st.filter = 'blur(3px)'; });
+      break;
+    default: // a crossfade while he works
+      st.transition = `opacity 900ms ease-in-out ${Math.round(dur * 0.35)}ms`;
+      requestAnimationFrame(() => { st.opacity = '0'; });
+    }
+    setTimeout(() => { img.remove(); c.ghosts = c.ghosts.filter(x => x !== img); }, dur + 1300);
+  }
+
+  const revealStyle = kind => (kind === 'remove' ? 'suck' : /^(paint|spray)$/.test(kind) ? 'wipe' : kind === 'erase' ? 'rub' : 'fade');
+
+  /** Every frame: covers follow their elements; none outstays COVER_MAX_MS. */
+  function trackCovers(c, now) {
+    for (const st of [c.cur, ...c.queue]) {
+      if (!st || !st.cover || st.revealing) continue;
+      placeCover(st);
+      if (now - st.coverAt > COVER_MAX_MS) reveal(c, st, 'fade');
+    }
   }
 
   /** Start the next step in the queue. */
@@ -548,14 +595,14 @@ ${CLAWD_CSS}`;
     } else if (!/^(idle|wave|error|think)$/.test(step.kind)) {
       effects(c, { kind: step.kind, color: step.color, measure: step.measure });
     }
-    if (step.ghostImg) consumeGhost(c, step);
+    if (step.cover) reveal(c, step, revealStyle(step.kind));
   }
 
   function finishStep(c) {
     const step = c.cur;
     c.cur = null;
     c.fx.replaceChildren();
-    if (step && step.ghostImg && !step.consumed) consumeGhost(c, step);
+    if (step && step.cover) reveal(c, step, 'fade');
     if (step) c.idleMood = step.kind === 'done' || step.kind === 'error' ? step.kind : 'idle';
     if (!c.queue.length && c.endAfterQueue) {
       c.leaving = true;
@@ -575,7 +622,7 @@ ${CLAWD_CSS}`;
       const t = resolve(cur);
       if (t) { cur.el = t; cur.retryUntil = 0; }
     }
-    if (cur && cur.el && !cur.el.isConnected && cur.rect) showGhost(c, cur);
+    trackCovers(c, now);
     const dest = destination(c);
     if (!c.pos) {
       // Walk on from the nearer side of the screen.
@@ -754,7 +801,13 @@ ${CLAWD_CSS}`;
     }
   }
 
-  /** A choreography from Claude: queue it; report what it's about to remove. */
+  // Changes that show up visually get a "before" cover; logic-only ones and new
+  // elements (nothing to picture yet) don't.
+  const COVERED = /^(remove|erase|paint|spray|polish|font|write|build|measure|dance|photo|tinker)$/;
+  /** How far (px, plus 30% of the element's smaller side) a change of this kind may spill out. */
+  const GROWS = { font: 24, write: 24, measure: 48, build: 48, polish: 16, dance: 16, photo: 16 };
+
+  /** A choreography from Claude: queue it; report what it's about to change. */
   function play(c, msg) {
     // Claude's own steps replace any guesses still waiting.
     c.queue = c.queue.filter(st => !st.guess);
@@ -765,15 +818,26 @@ ${CLAWD_CSS}`;
     const ghosts = [];
     for (const st of msg.steps || []) {
       const s = { ...st, id: ++stepSeq };
-      if (/^(remove|erase)$/.test(s.kind)) {
+      if (COVERED.test(s.kind)) {
         // Find it now, before the edit lands, so it can be snapshotted.
         s.el = resolve(s);
         if (s.el) {
           const r = s.el.getBoundingClientRect();
           s.rect = r;
           const { w, h } = vp();
-          if (r.right > 0 && r.bottom > 0 && r.left < w && r.top < h) {
-            ghosts.push({ step: s.id, rect: { left: Math.max(0, r.left), top: Math.max(0, r.top), width: Math.min(r.right, w) - Math.max(0, r.left), height: Math.min(r.bottom, h) - Math.max(0, r.top) } });
+          // Changes that can grow the element also get a margin of its surroundings, so
+          // the bigger new version doesn't peek out from under the cover.
+          const pad = GROWS[s.kind] ? Math.round(GROWS[s.kind] + Math.min(r.width, r.height) * 0.3) : 0;
+          const crop = {
+            left: Math.max(0, r.left - pad), top: Math.max(0, r.top - pad),
+            width: Math.min(r.right + pad, w) - Math.max(0, r.left - pad),
+            height: Math.min(r.bottom + pad, h) - Math.max(0, r.top - pad),
+          };
+          if (crop.width > 2 && crop.height > 2 && crop.width * crop.height < w * h * 0.6) {
+            // (Not for huge targets: covering most of the page would hide too much.)
+            s.crop = crop;
+            s.cropOff = { x: crop.left - r.left, y: crop.top - r.top };
+            ghosts.push({ step: s.id, rect: crop });
           }
         }
       }
@@ -783,9 +847,10 @@ ${CLAWD_CSS}`;
   }
 
   function attachGhosts(c, msg) {
+    const now = performance.now();
     for (const g of msg.ghosts || []) {
-      const s = [c.cur, ...c.queue].find(x => x && x.id === g.step);
-      if (s && g.src) { s.ghostSrc = g.src; s.rect = g.rect; }
+      const st = [c.cur, ...c.queue].find(x => x && x.id === g.step);
+      if (st && g.src && !st.revealing) { st.coverSrc = g.src; showCover(c, st, now); }
     }
   }
 
