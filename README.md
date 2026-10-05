@@ -70,9 +70,9 @@ Clawd, in its own colour.
 
 ### The toolbar icon
 
-The icon is **in colour** on pages Clawd is working on, and **grey** everywhere else. Hover
-over it to see why it's grey (no Claude session on this dev server yet, waiting for Claude
-Code, muted here, or turned off).
+Clawd is **awake** in the toolbar on pages he's working on, and **asleep** (dimmed, with a
+little Z) everywhere else. Hover over him to see why he's asleep: no Claude session on this
+dev server yet, waiting for Claude Code, muted here, or turned off.
 
 The popup has:
 
@@ -130,9 +130,9 @@ No Claude Code session with the plugin is running. Start one (or run `/reload-pl
 check `/plugin` lists `clawd@live-clawd` as enabled. Also check `node --version` works in the
 terminal you start Claude Code from.
 
-**The icon stays grey on my dev page.**
-Clawd hasn't connected this page to a Claude session yet. It turns colour as soon as Claude
-does something in that project. If it never does:
+**The toolbar Clawd stays asleep on my dev page.**
+Clawd hasn't connected this page to a Claude session yet. He wakes up as soon as Claude does
+something in that project. If he never does:
 - Make sure the dev server was started from inside the project folder, and the page's port
   is that dev server's (not a proxy in front of it).
 - Or add the project to `~/.config/live-clawd/config.json` (see *Settings*).

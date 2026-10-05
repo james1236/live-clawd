@@ -28,7 +28,7 @@ const RECENT_MS = 90000; // re-show a session's Clawd on tab switch/reload withi
 const LOOPBACK = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/;
 const ALL_URLS = { origins: ['<all_urls>'] }; // optional: lets him take "before" pictures
 const ICON = { 16: 'icons/icon-16.png', 32: 'icons/icon-32.png', 48: 'icons/icon-48.png', 128: 'icons/icon-128.png' };
-const ICON_GRAY = Object.fromEntries(Object.entries(ICON).map(([k, v]) => [k, v.replace('.png', '-gray.png')]));
+const ICON_ASLEEP = Object.fromEntries(Object.entries(ICON).map(([k, v]) => [k, v.replace('.png', '-asleep.png')]));
 
 let settings = { enabled: true, muted: [], sound: true, volume: 0.35 };
 let ws = null;
@@ -357,12 +357,12 @@ api.tabs.onUpdated.addListener((tabId, info, tab) => {
 });
 
 // ---------------------------------------------------------------------------------------
-// The toolbar icon: in colour only on a tab Clawd acts on (a localhost dev server of one of
-// your Claude sessions, with Live Clawd on, connected, and not muted there); grey elsewhere.
+// The toolbar icon: awake only on a tab Clawd acts on (a localhost dev server of one of your
+// Claude sessions, with Live Clawd on, connected, and not muted there); asleep elsewhere.
 // ---------------------------------------------------------------------------------------
 const action = api.action || api.browserAction;
 
-/** Why the icon is grey on this tab, or '' if Clawd acts here. */
+/** Why Clawd is asleep on this tab, or '' if he acts here. */
 function inactiveReason(url) {
   const o = originOf(url);
   if (!settings.enabled) return 'Turned off';
@@ -376,7 +376,7 @@ function inactiveReason(url) {
 function setIcon(tab) {
   if (!tab || tab.id == null) return;
   const why = inactiveReason(tab.url);
-  action.setIcon({ tabId: tab.id, path: why ? ICON_GRAY : ICON }).catch(() => {});
+  action.setIcon({ tabId: tab.id, path: why ? ICON_ASLEEP : ICON }).catch(() => {});
   action.setTitle({ tabId: tab.id, title: why ? `Live Clawd: ${why.toLowerCase()}` : 'Live Clawd: on this page' }).catch(() => {});
 }
 
