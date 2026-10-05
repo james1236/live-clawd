@@ -29,6 +29,74 @@ restarts with whichever session serves it.
 The userscript-generating extension this grew out of (a Violentmonkey fork with a native
 messaging bridge) is gone from the tree; it's kept at the `archive/clawdify-userscripts` tag.
 
+## Releases
+
+`release/` holds what the README links to (raw GitHub URLs, so it must be committed):
+`live-clawd.xpi` (Firefox, signed on AMO as an unlisted add-on) and `live-clawd-chrome.zip`
+(the `extension/dist/chrome` folder, for Load unpacked). After changing the extension:
+bump `extension/package.json`'s version (AMO rejects a version it has signed before),
+`./dev.sh`, then sign:
+
+```sh
+set -a; . ~/.config/amo.env; set +a   # AMO_JWT_ISSUER / AMO_JWT_SECRET
+npx web-ext@10.7.0 sign --channel=unlisted --source-dir extension/dist/firefox \
+  --artifacts-dir /tmp/signed --api-key "$AMO_JWT_ISSUER" --api-secret "$AMO_JWT_SECRET"
+```
+
+and copy the `.xpi` to `release/live-clawd.xpi`; re-zip `dist/chrome` as
+`release/live-clawd-chrome.zip` (top folder `live-clawd-chrome`). Firefox add-on ID:
+`live-clawd@popup-games` (changing it makes a different add-on). Extension author:
+popup-games; plugin/marketplace author: james1236.
+
+## Decisions (and what was rejected)
+
+- **No pairing step** for the bridge: the Origin and `X-Clawd` checks are enough. A program
+  on the machine could fake them, but it can read `~/.claude` anyway.
+- **No native messaging**: Claude Code starts things, not the browser, so a localhost bridge
+  run by the plugin needs no installer, registry keys or WSL plumbing. (The userscript
+  side needed native messaging to launch `claude -p`; it was dropped, see the tag.)
+- **esbuild, not the old webpack/Babel**: Babel's loose `for…of` turned loops over Map
+  iterators into zero-iteration loops (hid the sad caption, the babies, the background's
+  replay-on-tab-switch and job cleanup). With esbuild that can't happen.
+- **Session identity**: the tmux pane when there is one; else the hook's `session_id`. The
+  MCP server never sees a session id, so a `clawd` call outside tmux goes to the session
+  that most recently sent a hook for the same project (`relay.mjs`), not a second Clawd.
+- **Colour**: always Clawd orange `#d97757`; per-session colours only when two or more
+  sessions active in the last 15 min each have a *different* dev page open
+  (`manyAtOnce()` in `background.js`).
+- A project root of `~`, its parent or `/` claims no dev servers automatically (a session
+  started in the home folder would otherwise claim them all); only the config lists them.
+- Before-pictures need the optional `<all_urls>` permission (capturing the tab); only a
+  click on one of our own pages can grant it, so the extension asks: a welcome tab on
+  install, a "!" badge until answered, and the request leads the popup.
+- Toolbar icon: awake on tabs Clawd acts on, a sleeping Clawd (dimmed, Z) elsewhere; a grey
+  icon was rejected as invisible on grey toolbars.
+
+## Bugs worth remembering
+
+- Overlay `lastPageError` started at 0 while `performance.now()` starts at 0 on page load,
+  so for 4s after every load Clawd thought the page had thrown ("Oh no… something threw an
+  error", then "Phew, fixed!"). Now starts at `-Infinity`.
+- Any Claude session with the plugin feeds whatever bridge is serving 47215, so demo and test
+  scripts that serve the bridge themselves pick up your real sessions' events. Use another
+  port for those (`CLAWD_PORT=…` for the plugin side, plus the extension's `BRIDGE` URL).
+
+## Verification status
+
+- Tested end to end: the bridge's security checks (a web page is refused as a WebSocket and
+  as a poster, 403); a real `claude -p` session using the plugin's tool by its plugin name
+  (`mcp__plugin_clawd_clawd__clawd`) with the Chrome build in headless Chrome; colours,
+  sleeping icon logic, welcome tab on install, demo recordings.
+- Used daily in Firefox by the user (temporary add-on), but the *signed* `.xpi` and the
+  Chrome build haven't been installed by hand in a real browser profile.
+- Not tested: macOS dev-server detection (`lsof` path), Claude Code on native Windows (no
+  detection; config file only), WSL with localhost forwarding off.
+
+The README's demo GIF was recorded on Bootstrap 4.0's Album example in `~/test/clawd-album`
+(vite :5180) by a throwaway script driving the bridge with scripted hook events and file
+edits, against a copy of `dist/chrome` patched for the recording only (private bridge port,
+"On it!" caption, always knitting, one water break pinned into a gap, `<all_urls>` granted).
+
 ## Recording and replaying Live Clawd sessions
 
 A replay plays back a recorded Claude Code session against Live Clawd with no Claude usage,
