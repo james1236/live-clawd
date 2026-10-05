@@ -399,8 +399,9 @@ him (once he's on screen). **Placement:** he stands beside what he's changing (r
 else left, else below, else above), facing it, never on it unless nothing fits; no name
 tag under the main Clawd; captions are a bit smaller than the 1.5x sprite and sit lower.
 A broken page makes him walk on screen first, then mope. At the chalkboard he writes
-with chalk. A bottle that hits the cursor knocks a stand-in arrow back for half a second
-(the real cursor hides meanwhile).
+with chalk. A bottle that hits the cursor sets off an impact ring and a star there. When he stands
+below his target the caption goes under him. Tests are a lab half the time (goggles, a
+flask brewing over a Bunsen burner, changing colour).
 
 > **Gotcha:** the build transpiles `for…of` in loose mode (index loop over `.length`), so
 > never iterate a Map/Set iterator directly: write `for (const c of [...clawds.values()])`.

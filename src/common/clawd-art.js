@@ -76,6 +76,10 @@ const RIGHT = [
     ['polygon', { points: '14,1.4 20.4,-0.6 15.6,2.8', fill: PAPER, stroke: '#bdb8ac', 'stroke-width': 0.2, class: 'cw-plane' }],
   ]),
   G('cw-prop cw-p-timer', [C(16.2, 2.6, 1.7, '#e0533f'), R(15.8, 0.5, 0.8, 0.6, '#4caf6a'), R(16, 1.2, 0.4, 1.4, PAPER, 'cw-dial')]),
+  G('cw-prop cw-p-tube', [
+    R(15.2, -2, 1.5, 5.4, 'rgba(225,242,255,.75)'), R(15.2, 0.6, 1.5, 2.8, '#5ccf6a'), R(15, -2.3, 1.9, 0.5, '#c9d6e2'),
+    C(15.9, -2.8, 0.35, '#9be6a6', 'cw-bub'), C(16.4, -3.6, 0.3, '#9be6a6', 'cw-bub cw-bub2'), C(15.6, -4.2, 0.25, '#9be6a6', 'cw-bub cw-bub3'),
+  ]),
   G('cw-prop cw-p-key', [C(16, 0.5, 1.2, '#e2b04a'), C(16, 0.5, 0.45, '#8a6a1f'), R(15.6, 1.5, 0.8, 3.5, '#e2b04a'), R(16.4, 3.5, 0.8, 0.5, '#e2b04a')]),
 ];
 
@@ -93,6 +97,10 @@ const LEFT = [
       R(-2.3, 2.2 + i * 1.4, 0.35, 0.5, '#3a9a52', `cw-chk cw-c${i}`), R(-2, 1.75 + i * 1.4, 0.35, 0.95, '#3a9a52', `cw-chk cw-c${i}`),
     ]),
   ]),
+  G('cw-lprop cw-l-flask', [
+    R(-1.2, 1.4, 1.2, 2, 'rgba(225,242,255,.75)'), C(-0.6, 4.5, 1.7, 'rgba(225,242,255,.75)'), C(-0.6, 4.9, 1.25, '#b46be0'),
+    C(-0.9, 4.4, 0.3, '#e0b9f5', 'cw-bub'), C(-0.2, 3.6, 0.25, '#e0b9f5', 'cw-bub cw-bub2'),
+  ]),
   G('cw-lprop cw-l-chalk', [R(0.7, 2.6, 0.7, 1.6, '#f4f1e8'), R(0.7, 2.6, 0.7, 0.4, '#d9d4c6')]),
   G('cw-lprop cw-l-notepad', [R(-2.5, 1.5, 3.5, 4.5, PAPER), R(-2.5, 1.5, 3.5, 0.7, '#e05a4f'), R(-2, 3, 2.5, 0.4, INK), R(-2, 4, 2.5, 0.4, INK)]),
 ];
@@ -100,6 +108,10 @@ const LEFT = [
 /** On Clawd's head / face. */
 const HEAD = [
   G('cw-hat cw-h-hardhat', [R(4, -2.2, 8, 2.2, '#f2c94c'), R(2.6, -0.4, 10.8, 0.9, '#e0b43a'), R(7.6, -2.2, 0.8, 2.2, '#e0b43a')]),
+  G('cw-hat cw-h-goggles', [
+    R(3, 1.5, 10, 0.6, '#5d636b'), R(4, 1, 3, 2.6, 'rgba(170,220,255,.55)'), R(9, 1, 3, 2.6, 'rgba(170,220,255,.55)'),
+    R(4, 1, 3, 0.4, '#8a9099'), R(9, 1, 3, 0.4, '#8a9099'),
+  ]),
   G('cw-hat cw-h-shades', [R(4, 1.6, 3, 1.8, '#111'), R(9, 1.6, 3, 1.8, '#111'), R(7, 2, 2, 0.5, '#111'), R(4.4, 1.9, 0.8, 0.4, '#666')]),
   G('cw-hat cw-h-binos', [
     R(4, 1.2, 3, 2.8, '#333'), R(9, 1.2, 3, 2.8, '#333'), R(7, 2, 2, 1, '#333'),
@@ -167,6 +179,18 @@ const FRONT = [
     G('cw-scarf', [R(6.8, 7, 2.6, 3, '#e05a8a'), R(6.8, 7.8, 2.6, 0.5, '#f7c7d8'), R(6.8, 9, 2.6, 0.5, '#f7c7d8')]),
     ['line', { x1: 4.4, y1: 5, x2: 9.8, y2: 7.6, stroke: STEEL, 'stroke-width': 0.45, class: 'cw-needle cw-nl' }],
     ['line', { x1: 11.6, y1: 5, x2: 6.2, y2: 7.6, stroke: STEEL, 'stroke-width': 0.45, class: 'cw-needle cw-nr' }],
+  ]),
+  // The lab: an Erlenmeyer flask brewing on a ring stand over a Bunsen burner.
+  G('cw-front cw-f-lab', [
+    R(16.2, 9.4, 3.6, 0.6, '#5d636b'), R(17.6, 7.7, 0.8, 1.7, '#8a9099'),
+    ['ellipse', { cx: 18, cy: 6.9, rx: 0.55, ry: 1, fill: '#4aa3ff', class: 'cw-flame' }],
+    ['ellipse', { cx: 18, cy: 7.15, rx: 0.25, ry: 0.5, fill: '#d6efff', class: 'cw-flame' }],
+    R(15.9, 5.6, 4.2, 0.35, STEEL), R(16, 5.6, 0.3, 4.4, STEEL), R(19.7, 5.6, 0.3, 4.4, STEEL),
+    ['polygon', { points: '17.3,2 18.7,2 18.7,3.3 20.3,5.6 15.7,5.6 17.3,3.3', fill: 'rgba(225,242,255,.7)', stroke: '#b9cbd9', 'stroke-width': 0.2 }],
+    ['polygon', { points: '16.4,4.6 19.6,4.6 20.3,5.6 15.7,5.6', class: 'cw-potion' }],
+    C(17.4, 4.9, 0.25, '#ffffffaa', 'cw-fizz'), C(18.6, 5.1, 0.2, '#ffffffaa', 'cw-fizz cw-fz2'), C(18, 4.8, 0.2, '#ffffffaa', 'cw-fizz cw-fz3'),
+    C(18, 1.3, 0.55, 'rgba(255,255,255,.7)', 'cw-steam'), C(18.6, 0.4, 0.45, 'rgba(255,255,255,.6)', 'cw-steam cw-st2'),
+    C(19.6, 1.9, 0.28, '#5ccf6a', 'cw-pourdrop'),
   ]),
   G('cw-front cw-f-compactor', [
     R(15.5, 2.5, 6, 7.5, '#7d8590'), R(16.2, 4.6, 4.6, 4.6, '#2b2f36'),
@@ -327,10 +351,10 @@ export function tossBottle(doc, parent, x, y, tx, ty, at) {
     if (left > 0 && (left -= dt) <= 0) {
       const m = cursor && cursor();
       if (m && Math.hypot(m.x - px, m.y - py) < 40) {
-        // Dink! Bounces back off the cursor and starts spinning; the cursor reels.
+        // Dink! Bounces back off the cursor (a ring and a star) and starts spinning.
         aligned = false;
         if (onHit) onHit();
-        bonkCursor(doc, parent, cursor, vx, vy, scale);
+        bonkCursor(doc, parent, m.x, m.y, vx, scale);
         const dir = vx >= 0 ? -1 : 1;
         vx = dir * (160 + Math.random() * 120);
         vy = -Math.abs(vy) * 0.25 - 260;
@@ -352,31 +376,11 @@ export function tossBottle(doc, parent, x, y, tx, ty, at) {
   win.requestAnimationFrame(frame);
 }
 
-/**
- * The bottle just hit the cursor: for a moment the real one hides and a stand-in arrow at
- * its spot is knocked back the way the bottle was going, with an impact ring and a
- * star, then springs back. Follows the mouse if it moves meanwhile.
- */
-function bonkCursor(doc, parent, cursor, vx, vy, scale = 1) {
+/** The bottle just hit the cursor at (x, y): an impact ring and a star flying off. */
+function bonkCursor(doc, parent, x, y, vx, scale = 1) {
   const win = doc.defaultView;
-  const NS = 'http://www.w3.org/2000/svg';
-  const hide = doc.createElement('style');
-  hide.textContent = '*, *::before, *::after { cursor: none !important; }';
-  (doc.head || doc.documentElement).appendChild(hide);
   const box = doc.createElement('div');
-  box.style.cssText = 'position:fixed;left:0;top:0;pointer-events:none;z-index:2147483647';
-  const svg = doc.createElementNS(NS, 'svg');
-  svg.setAttribute('width', 14 * scale);
-  svg.setAttribute('height', 21 * scale);
-  svg.setAttribute('viewBox', '0 0 14 21');
-  svg.style.cssText = 'position:absolute;left:0;top:0;overflow:visible;transform-origin:0 0';
-  const arrow = doc.createElementNS(NS, 'path');
-  arrow.setAttribute('d', 'M1 1 L1 17 L5 13.4 L8 20 L10.6 18.8 L7.7 12.4 L13 12.4 Z');
-  arrow.setAttribute('fill', '#000');
-  arrow.setAttribute('stroke', '#fff');
-  arrow.setAttribute('stroke-width', '1.2');
-  arrow.setAttribute('stroke-linejoin', 'round');
-  svg.appendChild(arrow);
+  box.style.cssText = `position:fixed;left:0;top:0;pointer-events:none;z-index:2147483647;transform:translate(${x}px, ${y}px)`;
   const ring = doc.createElement('div');
   ring.style.cssText = `position:absolute;left:${-12 * scale}px;top:${-12 * scale}px;width:${24 * scale}px;height:${24 * scale}px;`
     + 'border-radius:50%;border:2px solid rgba(58,123,213,.8);transform:scale(.3);opacity:1;'
@@ -385,32 +389,15 @@ function bonkCursor(doc, parent, cursor, vx, vy, scale = 1) {
   star.textContent = '✦';
   star.style.cssText = `position:absolute;left:${4 * scale}px;top:${-16 * scale}px;font:${12 * scale}px sans-serif;color:#f2b632;`
     + 'transition:transform .4s ease-out, opacity .4s ease-in;opacity:1';
-  box.append(ring, svg, star);
+  box.append(ring, star);
   parent.appendChild(box);
-  const d = Math.hypot(vx, vy) || 1;
-  const kx = vx / d * 9 * scale;
-  const ky = vy / d * 9 * scale;
-  const spin = vx >= 0 ? 24 : -24;
-  const t0 = win.performance.now();
-  const DUR = 480;
-  win.requestAnimationFrame(() => {
+  win.requestAnimationFrame(() => win.requestAnimationFrame(() => {
     ring.style.transform = 'scale(1.6)';
     ring.style.opacity = '0';
-    star.style.transform = `translate(${kx * 0.8}px, ${-8 * scale}px) rotate(90deg)`;
+    star.style.transform = `translate(${(vx >= 0 ? 1 : -1) * 7 * scale}px, ${-8 * scale}px) rotate(90deg)`;
     star.style.opacity = '0';
-  });
-  const frame = now => {
-    const t = Math.min(1, (now - t0) / DUR);
-    const m = cursor();
-    // Knocked back fast, then a damped spring home.
-    const k = t < 0.15 ? t / 0.15 : Math.exp(-(t - 0.15) * 6) * Math.cos((t - 0.15) * 14);
-    box.style.visibility = m ? '' : 'hidden'; // the mouse left the page
-    if (m) box.style.transform = `translate(${m.x}px, ${m.y}px)`;
-    svg.style.transform = `translate(${kx * k}px, ${ky * k}px) rotate(${spin * k}deg)`;
-    if (t < 1) win.requestAnimationFrame(frame);
-    else { box.remove(); hide.remove(); }
-  };
-  win.requestAnimationFrame(frame);
+  }));
+  setTimeout(() => box.remove(), 500);
 }
 
 /** Which prop groups each mood shows. */
@@ -441,6 +428,7 @@ const SHOW = {
   canvas: ['cw-f-easel', 'cw-p-brush', 'cw-h-beret'],
   // long-running work, waiting, results
   test: ['cw-l-clipboard', 'cw-p-pencil'],
+  lab: ['cw-h-goggles', 'cw-p-tube', 'cw-l-flask', 'cw-f-lab'],
   compile: ['cw-h-hardhat', 'cw-p-hammer', 'cw-f-bricks'],
   install: ['cw-f-box'],
   mail: ['cw-p-plane'],
@@ -649,6 +637,27 @@ ${showCss}
 .m-test .cw-al { transform: translateY(-1px); }
 .m-test .cw-ar { animation: cw-tap .26s steps(2) infinite alternate; }
 .m-test .cw-look { animation: none; transform: translate(-1px, 1px); }
+
+/* ...or, half the time, brewing in the lab: goggles on, tipping a test tube into a flask
+   that bubbles, steams and changes colour over a Bunsen burner */
+@keyframes cw-pour { 0%, 100% { transform: rotate(36deg); } 50% { transform: rotate(44deg); } }
+@keyframes cw-bubble { 0% { opacity: 0; transform: translateY(1px); } 30% { opacity: 1; } 100% { opacity: 0; transform: translateY(-2.5px); } }
+@keyframes cw-brew { 0%, 100% { fill: #5ccf6a; } 33% { fill: #4aa3ff; } 66% { fill: #b46be0; } }
+@keyframes cw-flicker { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(.85, 1.2); } }
+@keyframes cw-fall { 0% { opacity: 0; transform: none; } 15% { opacity: 1; } 80% { opacity: 1; transform: translateY(2.8px); } 100% { opacity: 0; transform: translateY(3px); } }
+.m-lab .cw-ar { animation: cw-pour 1.2s ease-in-out infinite; }
+.cw-potion { fill: #5ccf6a; }
+.m-lab .cw-potion { animation: cw-brew 4.5s linear infinite; }
+.m-lab .cw-flame { transform-origin: 18px 7.9px; animation: cw-flicker .25s steps(2) infinite; }
+.m-lab .cw-fizz { animation: cw-bubble .8s ease-out infinite; }
+.m-lab .cw-fz2 { animation-delay: .27s; } .m-lab .cw-fz3 { animation-delay: .53s; }
+.m-lab .cw-steam { animation: cw-float 1.6s ease-out infinite; }
+.m-lab .cw-st2 { animation-delay: .8s; }
+.m-lab .cw-pourdrop { animation: cw-fall .6s ease-in infinite; }
+.m-lab .cw-al { transform: translateY(-1px); }
+.m-lab .cw-bub { animation: cw-bubble 1s ease-out infinite; }
+.m-lab .cw-bub2 { animation-delay: .33s; } .m-lab .cw-bub3 { animation-delay: .66s; }
+.m-lab .cw-look { animation: none; transform: translate(1px, -1px); }
 
 /* building the project: hard hat, hammers away while the wall grows */
 @keyframes cw-row1 { 0%, 32% { opacity: 0; } 33%, 100% { opacity: 1; } }

@@ -85,6 +85,8 @@ function install() {
   padding: ${3 * LABEL_SCALE}px ${9 * LABEL_SCALE}px; border-radius: ${10 * LABEL_SCALE}px;
   background: #1f1e1d; color: #faf9f5; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
 .label:empty { display: none; }
+/* standing below what he's changing: the caption goes under him, out of its way */
+.label.under { bottom: auto; top: calc(100% - ${2 * SCALE}px); transform: translateX(-50%); }
 .tag { position: absolute; left: 50%; top: calc(100% + 1px); transform: translateX(-50%); white-space: nowrap;
   font-size: ${10 * SCALE}px; font-weight: 600; color: #faf9f5; background: var(--clawd); border-radius: ${7 * SCALE}px; padding: 0 ${6 * SCALE}px; opacity: .92; }
 .tag:empty { display: none; }
@@ -450,7 +452,7 @@ ${CLAWD_CSS}`;
     if (r.right + gap + 2 * half <= w) return { fx: r.right + gap + half, fy: sideY };
     if (r.left - gap - 2 * half >= 0) return { fx: r.left - gap - half, fy: sideY };
     const midX = r.left + Math.min(r.width / 2, 80 * SCALE) + c.offset;
-    if (r.bottom + gap + tall <= h - BELOW) return { fx: midX, fy: r.bottom + gap + tall };
+    if (r.bottom + gap + tall <= h - BELOW - 30 * SCALE) return { fx: midX, fy: r.bottom + gap + tall, under: true };
     if (r.top - gap >= top) return { fx: midX, fy: r.top - gap };
     return {
       fx: r.left + Math.min(56 * SCALE, r.width / 2) + c.offset,
@@ -467,6 +469,7 @@ ${CLAWD_CSS}`;
     }
     const step = c.cur;
     const r = step && stepRect(step);
+    let under = false;
     let fx;
     let fy;
     const pt = step && stepPoint(step, r);
@@ -474,12 +477,13 @@ ${CLAWD_CSS}`;
       fx = pt.x - HAND.x; // hand on the spot
       fy = pt.y + HAND.y;
     } else if (r) {
-      ({ fx, fy } = besideRect(c, r, w, h));
+      ({ fx, fy, under } = besideRect(c, r, w, h));
     } else {
       fx = w - 70 * SCALE - c.offset * 2;
       fy = h - BELOW;
     }
-    // Keep all of him on screen: caption above, name tag below.
+    c.label.classList.toggle('under', !!under);
+    // Keep all of him on screen: caption above (or below), babies' name tags below.
     fx = clamp(fx, FOOT_X + 4, w - (SPRITE_W - FOOT_X) - 4);
     fy = clamp(fy, FOOT_Y + 26 * SCALE, h - BELOW);
     return { x: fx - FOOT_X, y: fy - FOOT_Y };
@@ -808,7 +812,7 @@ ${CLAWD_CSS}`;
       if (cur && now > cur.endAt) finishStep(c);
       else if (cur) {
         c.lastWork = now;
-        const mood = cur.hold ? heldMood(c, cur, now) : cur.kind === 'paint' && !cur.rect ? 'canvas' : cur.kind;
+        const mood = cur.hold ? heldMood(c, cur, now) : cur.kind === 'paint' && !cur.rect ? 'canvas' : moodOf(cur);
         show(c, mood, now);
         const snd = ACTION_SOUNDS[mood];
         if (snd && now > (c.nextSfx || 0) && !cur.rung) {
@@ -876,7 +880,7 @@ ${CLAWD_CSS}`;
    */
   function heldMood(c, step, now) {
     const t = now - step.arrivedAt;
-    let mood = step.kind;
+    let mood = moodOf(step);
     if (step.kind === 'think') {
       if (t > PONDER_AFTER) mood = 'ponder';
     } else if (step.kind !== 'compact') {
@@ -885,6 +889,15 @@ ${CLAWD_CSS}`;
     }
     if (mood === 'doze' && !step.dozing) { step.dozing = true; sfx('yawn'); c.nextSfx = now + 3000; }
     return mood;
+  }
+
+  /** Some moods have a look-alike picked at random, once per step: the tests are a lab half the time. */
+  const VARIANTS = { test: ['test', 'lab'] };
+  function moodOf(step) {
+    const v = VARIANTS[step.kind];
+    if (!v) return step.kind;
+    if (!step.variant) step.variant = v[Math.floor(Math.random() * v.length)];
+    return step.variant;
   }
 
   /** Stop holding a step: it gets its normal minimum time, or ends now if it's had that. */
