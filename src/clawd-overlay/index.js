@@ -23,6 +23,7 @@
  */
 import { CLAWD_CSS, VIEWBOX, clawdSpriteNode, eyeOffset, lookAt, setMood, tossBottle } from '@/common/clawd-art';
 import { MOOD_LABEL } from '@/common/clawd-actions';
+import { ACTION_SOUNDS } from '@/common/clawd-sound';
 
 function install() {
   const SPRITE_W = 96; // px
@@ -128,6 +129,52 @@ ${CLAWD_CSS}`;
   let stepSeq = 0;
   let mouse = null;
   window.addEventListener('mousemove', e => { mouse = { x: e.clientX, y: e.clientY }; }, { passive: true, capture: true });
+
+  // --- Sounds: played by the extension's background page ---------------------------
+  const sfxAt = new Map();
+  function sfx(name) {
+    const now = performance.now();
+    if (now - (sfxAt.get(name) || 0) < 60) return;
+    sfxAt.set(name, now);
+    try {
+      if (typeof browser !== 'undefined') browser.runtime.sendMessage({ cmd: 'ClawdSound', data: { name } }).catch(() => {});
+    } catch { /* not in an extension (tests) */ }
+  }
+
+  // --- Is the dev page broken right now? (Live Clawds get sad until it's fixed) -------
+  const BROKEN_SAY = {
+    build: 'Oh no… the build broke 😢',
+    blank: 'Oh no… the page went blank 😢',
+    error: 'Oh no… something threw an error 😢',
+  };
+  let lastPageError = 0;
+  let rootSeen = false;
+  let broken = '';
+  let brokenCheckAt = 0;
+  window.addEventListener('error', e => { if (e && (e.error || e.message)) lastPageError = performance.now(); }, true);
+  window.addEventListener('unhandledrejection', () => { lastPageError = performance.now(); }, true);
+  function brokenReason(now) {
+    if (document.querySelector('vite-error-overlay, nextjs-portal, #webpack-dev-server-client-overlay, react-error-overlay')) return 'build';
+    const root = document.getElementById('root') || document.getElementById('app') || document.getElementById('__next');
+    if (root) {
+      if (root.childElementCount) rootSeen = true;
+      else if (rootSeen) return 'blank';
+    }
+    return now - lastPageError < 4000 ? 'error' : '';
+  }
+  function checkBroken(now) {
+    if (now < brokenCheckAt) return;
+    brokenCheckAt = now + 400;
+    const next = brokenReason(now);
+    if (next === broken) return;
+    const was = broken;
+    broken = next;
+    for (const c of [...clawds.values()]) {
+      if (!c.live) continue;
+      if (next && !was) { sfx('sad'); c.nextSfx = now + 2600; }
+      else if (!next) { sfx('phew'); setLabel(c, 'Phew, fixed! 😅'); c.phewUntil = now + 1500; }
+    }
+  }
   document.addEventListener('mouseleave', () => { mouse = null; }, { passive: true });
 
   const el = (tag, cls, parent, text) => {
@@ -162,7 +209,7 @@ ${CLAWD_CSS}`;
   function hideAll() {
     cancelAnimationFrame(raf);
     raf = 0;
-    for (const c of clawds.values()) dropDom(c);
+    for (const c of [...clawds.values()]) dropDom(c);
     clawds.clear();
     if (host) host.remove();
   }
@@ -227,6 +274,7 @@ ${CLAWD_CSS}`;
     }
     if (msg.color) setColor(c, msg.color);
     if (msg.tag != null) c.tagEl.textContent = msg.tag;
+    if (msg.live) c.live = true; // a dev page: Live Clawd gets sad when it breaks
     return c;
   }
 
@@ -463,6 +511,7 @@ ${CLAWD_CSS}`;
     // A Clawd waving for attention is dismissed by a click (until Claude has news).
     if (c.cur && c.cur.kind === 'wave') {
       c.dismissed = true;
+      sfx('pop');
       c.queue = [];
       c.cur = { kind: 'idle', say: 'OK, I’ll wait 👍', ms: 700, id: ++stepSeq };
       c.leaving = true;
@@ -473,6 +522,7 @@ ${CLAWD_CSS}`;
     c.lastTickle = now;
     setLabel(c, TICKLES[Math.min(c.tickles++, TICKLES.length - 1)]);
     c.tickleUntil = now + 1300;
+    sfx('giggle');
   }
 
   /** Eyes follow a nearby cursor; he gives a little start when it first comes close. */
@@ -483,7 +533,7 @@ ${CLAWD_CSS}`;
     const dy = mouse.y - (c.pos.y + EYES.y);
     const near = Math.hypot(dx, dy) < NEAR;
     if (near) {
-      if (!c.near && /^(idle|done|think|read)$/.test(c.mood)) c.noticeUntil = now + 350;
+      if (!c.near && /^(idle|done|think|read)$/.test(c.mood)) { c.noticeUntil = now + 350; sfx('boop'); }
       lookAt(c.svg, flip ? -dx : dx, dy);
     } else if (c.near) {
       lookAt(c.svg, null);
@@ -538,6 +588,7 @@ ${CLAWD_CSS}`;
     const fromLeft = hand.x < step.crop.left + step.crop.width / 2;
     switch (how) {
     case 'suck': // into the vacuum nozzle
+      sfx('slurp');
       st.transition = 'transform 1.1s cubic-bezier(.6, 0, .9, .5), opacity 1.1s ease-in';
       requestAnimationFrame(() => {
         st.transform = `translate(${hand.x}px, ${hand.y}px) scale(.03)`;
@@ -587,6 +638,9 @@ ${CLAWD_CSS}`;
   function arrive(c, now) {
     const step = c.cur;
     step.arrivedAt = now;
+    c.nextSfx = 0;
+    if (step.kind === 'done') sfx('happy');
+    else if (step.kind === 'error') sfx('sad');
     // Backed up? Get through it quicker rather than skipping anything.
     const hurry = c.queue.length >= 3 ? 0.5 : 1;
     step.endAt = now + Math.max(900, step.ms * hurry);
@@ -612,7 +666,27 @@ ${CLAWD_CSS}`;
     }
   }
 
+  /** The page is broken (or just got fixed): stand still, mope (or cheer), pause the queue. */
+  function moping(c, now, dt) {
+    const sad = broken && c.live;
+    const phew = c.phewUntil > now;
+    if (!sad && !phew) {
+      if (c.phewUntil) { c.phewUntil = 0; setLabel(c, c.cur ? c.cur.say || '' : ''); }
+      return false;
+    }
+    if (c.cur && c.cur.endAt) c.cur.endAt += dt * 1000;
+    if (sad) setLabel(c, BROKEN_SAY[broken]); // also covers a Clawd that walks on mid-breakage
+    if (sad && now > (c.nextSfx || 0)) { sfx('sniffle'); c.nextSfx = now + 2600; }
+    show(c, sad ? 'sad' : 'done', now);
+    c.glow.classList.remove('on');
+    c.box.classList.remove('on');
+    c.root.style.transform = `translate(${Math.round(c.pos.x)}px, ${Math.round(c.pos.y)}px)`;
+    placeLabel(c);
+    return true;
+  }
+
   function update(c, now, dt) {
+    if (c.pos && moping(c, now, dt)) return;
     const s = c.cur;
     if (!s && c.queue.length) begin(c, now);
     const cur = c.cur;
@@ -641,6 +715,8 @@ ${CLAWD_CSS}`;
     if (moving) {
       const sp = dist > 400 ? RUN : SPEED;
       const k = Math.min(dist, sp * dt);
+      c.stepAcc = (c.stepAcc || 0) + dt;
+      if (c.stepAcc > (sp === RUN ? 0.11 : 0.17)) { c.stepAcc = 0; sfx('step'); }
       c.pos.x += dx / dist * k;
       c.pos.y += dy / dist * k;
       if (Math.abs(dx) > 2) c.turn.classList.toggle('flip', dx < 0);
@@ -656,7 +732,10 @@ ${CLAWD_CSS}`;
       if (cur && now > cur.endAt) finishStep(c);
       else if (cur) {
         c.lastWork = now;
-        show(c, cur.kind === 'paint' && !cur.rect ? 'canvas' : cur.kind, now);
+        const mood = cur.kind === 'paint' && !cur.rect ? 'canvas' : cur.kind;
+        show(c, mood, now);
+        const snd = ACTION_SOUNDS[mood];
+        if (snd && now > (c.nextSfx || 0)) { sfx(snd[0]); c.nextSfx = now + snd[1]; }
       } else {
         idle(c, now);
       }
@@ -673,6 +752,8 @@ ${CLAWD_CSS}`;
     if (busy && now > c.nextWater && !c.waterUntil && !c.throwUntil) {
       c.waterUntil = now + 3000; // matches the one-shot drinking animation
       c.litres += 0.5;
+      [700, 1150, 1600, 2050].forEach(t => setTimeout(() => c.waterUntil && sfx('glug'), t));
+      setTimeout(() => c.waterUntil && sfx('ahh'), 2750);
       c.waterEl.textContent = `💧 ${c.litres.toFixed(1)} L`;
       c.waterEl.classList.add('on');
       setLabel(c, MOOD_LABEL.water);
@@ -687,6 +768,7 @@ ${CLAWD_CSS}`;
       const hand = handPos(c);
       const aim = mouse || { x: hand.x + hand.dir * 260, y: hand.y - 220 };
       tossBottle(document, layer, hand.x, hand.y, aim.x, aim.y);
+      sfx('whoosh');
       c.waterEl.classList.remove('on');
       setLabel(c, '');
     }
@@ -697,6 +779,7 @@ ${CLAWD_CSS}`;
     raf = requestAnimationFrame(tick);
     const dt = Math.min(0.05, (now - lastT) / 1000);
     lastT = now;
+    if ([...clawds.values()].some(c => c.live)) checkBroken(now);
     for (const c of [...clawds.values()]) update(c, now, dt);
   }
 

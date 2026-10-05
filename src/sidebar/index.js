@@ -155,6 +155,8 @@ const TICKLES = ['Hehe! 😆', 'Hahaha, stop it!', 'I’m trying to work here! �
 const MASCOT_W = 112;
 const EYES = eyeOffset(MASCOT_W);
 
+const sfx = name => sendCmdDirectly('ClawdSound', { name }).catch(() => {});
+
 function showWater() {
   $('waterc').textContent = litres ? `💧 ${litres.toFixed(1)} L guzzled` : '';
 }
@@ -185,6 +187,7 @@ mascotEl.addEventListener('click', () => {
   lastTickle = now;
   tickleText = TICKLES[Math.min(tickles++, TICKLES.length - 1)];
   tickleUntil = now + 1300;
+  sfx('giggle');
   paintStage();
   setTimeout(paintStage, 1350);
 });
@@ -214,6 +217,7 @@ setInterval(() => {
     throwUntil = now + 450;
     paintStage();
     setTimeout(() => {
+      sfx('whoosh');
       const r = spriteEl.getBoundingClientRect();
       const hx = r.left + r.width * 0.78;
       const hy = r.top + r.height * 0.45;
@@ -227,6 +231,8 @@ setInterval(() => {
   if (!waterUntil && !throwUntil && now > nextWater) {
     waterUntil = now + 3000;
     nextWater = now + 25000 + Math.random() * 20000;
+    [700, 1150, 1600, 2050].forEach(t => setTimeout(() => waterUntil && sfx('glug'), t));
+    setTimeout(() => waterUntil && sfx('ahh'), 2750);
     litres += 0.5;
     try { localStorage.setItem(LITRES_KEY, String(litres)); } catch { /* ignore */ }
     showWater();
@@ -494,6 +500,7 @@ function setAway(on) {
   setMood(spriteEl, 'walk');
   spriteEl.parentNode.style.transform = on ? '' : 'scaleX(-1)'; // walk back in facing left
   m.classList.toggle('away', on);
+  if (document.visibilityState === 'visible') for (let i = 0; i < 5; i++) setTimeout(() => sfx('step'), i * 170);
   awayTimers.push(setTimeout(() => {
     m.classList.remove('moving');
     spriteEl.parentNode.style.transform = '';

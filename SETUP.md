@@ -5,6 +5,9 @@ change to the current site; a local **Claude Code** process writes/edits the use
 streaming progress into the Firefox sidebar. It uses your Claude **subscription** (the
 bridge strips `ANTHROPIC_API_KEY` so `claude -p` never falls back to a metered API key).
 
+> This checkout's `local` branch is **Clawdify** — see [Clawdify (this fork)](#clawdify-this-fork)
+> at the end for what it adds and how it's set up (Windows Firefox + WSL bridge, Live Clawd).
+
 ## One-time setup
 
 ```bash
@@ -213,3 +216,159 @@ Everything ClaudeMonkey writes lives under `~/.claudemonkey/`:
   caught via a `document_start` collector; the refreshed DOM snapshot is the primary signal
   Claude uses to confirm the change is actually present. Tune rounds via `MAX_VERIFY_ROUNDS`
   in `src/background/utils/ai.js`.
+
+---
+
+## Clawdify (this fork)
+
+Clawdify is ClaudeMonkey on the `local` branch with: a Claude-style UI and the pixel-art
+**Clawd** mascot, per-site chats, **approval-gated browser tools** (act in the tab, save
+files, recurring watches), and **Live Clawd**, which animates Clawd on your localhost dev
+pages while *any* Claude Code session works on that project. Only display names changed:
+the gecko id is `claudemonkey@james.local`, the native host is still `claudemonkey.bridge`,
+userscripts are still named `ClaudeMonkey - <domain>`.
+
+### Windows Firefox + WSL
+
+Firefox runs on Windows; the bridge, `node` (v24 via nvm) and `claude` run in WSL (Ubuntu).
+`bridge/install.sh` only handles Linux/macOS, so the Windows side is a hand-made shim in
+`C:\Users\James\claudemonkey\`:
+
+- `host.bat`: `wsl.exe -d Ubuntu --exec /home/james/firefox-claudemonkey/bridge/host-launcher.sh %*`
+- `claudemonkey.bridge.json`: the native-messaging manifest pointing at `host.bat`, allowing
+  `claudemonkey@james.local` (and the old `claudemonkey@local`)
+- registry key `HKCU\Software\Mozilla\NativeMessagingHosts\claudemonkey.bridge` → that JSON
+
+Native messaging through `wsl.exe` was verified byte-exact (length-prefixed ping/pong).
+The first request after WSL has been idle can hit the extension's 8s ping timeout while the
+VM boots; retry.
+
+### Building and installing
+
+`update.sh` (local helper):
+
+| | |
+|---|---|
+| `./update.sh --dev` | build and copy `dist/` to `C:\Users\James\claudemonkey\dist` — **current workflow**: load `dist\manifest.json` via `about:debugging` → *Load Temporary Add-on*, then press *Reload* after each build (re-load after a Firefox restart) |
+| `./update.sh --no-pull` | build + AMO **unlisted** signing → `clawdify-<version>.xpi` (installs permanently in Release Firefox) |
+| `./update.sh` | merge `origin/main` first, then as above |
+
+Signing needs `~/.config/amo.env` (`AMO_JWT_ISSUER`/`AMO_JWT_SECRET`) and takes ~2–3 min,
+almost all of it AMO validation + its signing queue (occasional 503s are retried). Each
+signed build gets a 4th version component (minutes since epoch) because AMO refuses a
+version twice. `web-ext` is pinned at **10.7.0** (devDependency, exact). The id had to
+change from `claudemonkey@local` because AMO answered *Forbidden* (owned by another account).
+
+### Sidebar, popup, look
+
+- The sidebar follows the active tab and shows **only that site's chat** (`AIGetState({domain})`
+  returns the site's thread); *New chat* drops its Claude session (`AINewChat`). Chats live
+  in memory and are lost when Firefox restarts.
+- Warm light/dark palette shared by popup and sidebar (`src/common/cm-theme.js`), Clawd
+  icon, dashboard grays warmed. Popup: chat context, per-site script on/off switch, Live
+  Clawd switch + *Mute here* on localhost pages, sound effects switch.
+- Clawd's progress notes render apart from Claude's narration (`note` events).
+
+### Clawdify tools (browser-initiated requests)
+
+The bridge's `claude -p` gets an MCP server (`bridge/mcp-browser.js`, per-request socket in
+`~/.claudemonkey/run/`, `--strict-mcp-config`). Requests no longer have to become userscripts:
+
+- **Tab tools** — `page_info`, `page_snapshot`, `page_eval`, `click`, `type`, `navigate`,
+  `reload`, `wait_for`, `screenshot` — and **`watch_create`** each run **only after the user
+  presses Approve** on a sidebar card (what, which page, Claude's reason, any code). Denials
+  and timeouts (240s) go back to Claude as "don't retry". This is a hard user requirement;
+  an ungated version was refused by the Claude Code permission classifier ("Create Unsafe
+  Agents") and then rejected by the user too.
+- Ungated (no tab access): `save_output` (→ `~/Clawdify/outputs/<site>/`, downloadable from
+  the sidebar), `notify`, `watch_list`, `watch_delete`.
+- Watches re-run the exact approved code on an interval in a background tab and notify on
+  change; listed with *Stop* in the sidebar; paused after 5 failures.
+- Only a pass that edited the userscript installs it and reloads the tab — otherwise the
+  verify loop's reload would undo one-off actions.
+
+Tested with real `claude` and a fake extension: approved `page_info` + `save_output` (CSV
+correct, userscript untouched), and a denied call (respected, not retried). Not yet
+exercised end-to-end in Firefox.
+
+### Clawd, the mascot
+
+- `src/common/clawd-art.js` — sprite as data (rendered to markup or DOM, Trusted-Types
+  safe), ~25 moods each with props: palette+beret (colour), spray can (gradients), sponge
+  (shadows/radius), "Aa" sign (fonts), pencil (text), eraser, vacuum (removal), hard hat +
+  hammer (layout), tape measure (sizes), block (add), wrench + sparks (events), laptop +
+  Matrix (network/logic), binoculars (observers), headphones (animation), camera (images),
+  chest (storage), magnifier, water break (drinks, then throws the bottle at your cursor),
+  wave sign (needs you; shows the tmux window `#N`), sad (rain cloud + tears). Eyes follow a
+  nearby cursor; click to tickle; click a waving Clawd to dismiss him.
+- `src/clawd-overlay/` — injected into the page; a closed shadow root on a click-through
+  layer (only Clawd's body takes clicks), attached to `<html>`; hidden before every DOM
+  snapshot/screenshot so Claude never sees him. Clawds walk on from the nearer edge and off
+  again (portals and the portal gun were tried and removed at the user's request).
+- Only one Clawd at a time: when one is on the page the sidebar's Clawd walks off its
+  stage (`ClawdGone`/`ClawdPresence`, tracked in `ai.js`).
+
+### Live Clawd (Claude Code sessions in WSL → localhost tabs)
+
+Purely cosmetic and local. Install/uninstall everything with
+`node bridge/install-clawd.mjs [--remove]` (backups: `*.bak-clawdify`):
+
+1. **Hooks** (`bridge/live-hook.sh`, async, via `install-hooks.mjs`): `UserPromptSubmit`,
+   `PreToolUse`, `PostToolUse`, `Notification`, `Stop`, `SessionEnd`. They exit at once
+   unless Firefox is listening (`~/.claudemonkey/live/alive` touched every 5s by the bridge),
+   then spool the hook JSON wrapped with the tmux window/pane. Zero Claude usage.
+2. **`clawd` MCP tool** (`bridge/clawd-mcp.js`, user scope, allowed via `mcp__clawd`) plus a
+   marked block in `~/.claude/CLAUDE.md`: Claude calls it **in the same message as a UI edit,
+   before it**, with steps `{target: {component|selector|text|testid, x, y}, action, say,
+   color, ms}`. Returns `off` when Firefox isn't listening (Claude stops calling it). It
+   waits ≤1.2s for the browser's ack (235ms measured with a simulated browser) so Clawd
+   starts before hot reload. Measured in a real run on a copy of microEDA: batched with
+   the edit, sensible targets/actions, never mentioned in reply/code; costs ~500 tokens of
+   cached context per request, ~100 output tokens per UI edit, and **one `ToolSearch` turn
+   per session** (Claude Code defers MCP tools; disabling that globally was rejected as it
+   would load every connector everywhere).
+3. **Bridge live mode** (`host.js`, `{type:'live-subscribe'}`): drains the spool (fs.watch +
+   250ms poll), maps the session's git root to dev-server ports (`ss -ltnp` +
+   `/proc/<pid>/cwd`, or `~/.claudemonkey/live.json` `{"projects": {...}, "ignore": [...]}`),
+   adds Claude's latest narration from the transcript, and for `PostToolUse` diffs changed
+   source files against what it last saw (`git status` + `HEAD`) — so it sees changes made
+   via Bash/python/git, not just the Edit tool. Clawdify's own runs set `CLAWDIFY_LIVE=0`.
+4. **Extension** (`src/background/utils/live.js`): routes to the visible localhost tab with a
+   matching port; one Clawd per session (keyed by tmux pane), colour fixed per tmux window.
+   Claude's choreography outranks hook-based guesses while it plays.
+5. **Overlay playback**: a step queue — every step plays its full time (backlogs speed up,
+   nothing is dropped). Targets resolve via selector/test id/text, or React components by
+   walking the fiber tree (`wrappedJSObject` in Firefox), most specific first; x/y gives a
+   point inside an element (canvas). **"Before" covers:** visible targets are snapshotted
+   (`captureVisibleTab` crop, with a margin for changes that can grow) before the edit lands,
+   covering the element while hot reload happens underneath; Clawd's action reveals the new
+   version (paint wipe, rub-out, vacuumed into the nozzle, crossfade). Covers never last
+   over 8s; most-of-page targets aren't covered.
+
+Known limits: a growing element can push content below it so a doubled line shows at the
+cover's edge until the reveal; scrolling mid-animation briefly shows the old picture; a
+change that names no component falls back to the file's component; canvas targets rely on
+Claude's x/y estimate. Rejected: making the tool wait for the whole animation (slows
+Claude), a cheap-model labeller (API cost).
+
+**Sound effects** (`src/common/clawd-sound.js`, played by the background page via the public
+`ClawdSound` command; popup switch): ~33 synthesised chiptune sounds — footsteps, glugs,
+"ahh", whoosh, giggles, per-action loops (swish, bonk, zap, blips, sonar, …), happy/sad
+jingles. All synthesise without error in Chrome; **not yet heard in Firefox** (the
+background page's autoplay behaviour is unverified).
+
+**Sad when the page breaks:** the overlay watches for a dev-server error overlay
+(`vite-error-overlay`, Next/webpack/CRA equivalents), the app root going blank after having
+content, or uncaught errors in the last 4s; live Clawds then mope (rain cloud, tears,
+sniffles, "Oh no… the build broke"), pausing their queue, and say "Phew, fixed!" on recovery
+before carrying on. Verified headless on microEDA with a real Vite error overlay.
+
+> **Gotcha:** the build transpiles `for…of` in loose mode (index loop over `.length`), so
+> never iterate a Map/Set iterator directly: write `for (const c of [...clawds.values()])`.
+> A bare `clawds.values()` loop silently runs zero times (this was the sad-caption bug).
+
+### Changes outside this repo
+
+`~/.claude/settings.json` (hooks, `mcp__clawd` allow), `~/.claude.json` (user MCP `clawd`),
+`~/.claude/CLAUDE.md` (marked Clawd block), the Windows shim + registry key above,
+`~/.config/amo.env`.

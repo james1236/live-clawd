@@ -130,6 +130,15 @@ const FX = [
   heart(-2.5, -3, 0.5, 'cw-heart cw-hh1'),
   heart(15.5, -4, 0.5, 'cw-heart cw-hh2'),
   heart(6.5, -6, 0.4, 'cw-heart cw-hh3'),
+  // a little rain cloud of sadness
+  G('cw-cloud', [
+    ['ellipse', { cx: 6.4, cy: -4.6, rx: 2.4, ry: 1.5, fill: '#9aa3ad' }],
+    ['ellipse', { cx: 9.2, cy: -5.4, rx: 2.8, ry: 2, fill: '#a9b2bc' }],
+    ['ellipse', { cx: 11.4, cy: -4.4, rx: 2, ry: 1.3, fill: '#9aa3ad' }],
+    R(4.4, -4.4, 9, 1.4, '#a2abb5'),
+    R(6, -2.6, 0.4, 1, '#7fb8e6', 'cw-rain'), R(8.6, -2.4, 0.4, 1, '#7fb8e6', 'cw-rain cw-r2'), R(11, -2.6, 0.4, 1, '#7fb8e6', 'cw-rain cw-r3'),
+  ]),
+  G('cw-tears', [R(5, 4, 0.6, 1, '#8cc4ef', 'cw-tear'), R(10, 4, 0.6, 1, '#8cc4ef', 'cw-tear cw-t2')]),
   G('cw-sweat', [R(12.6, -0.6, 0.8, 1.2, '#8cc4ef'), R(12.8, -1.2, 0.4, 0.6, '#8cc4ef')]),
   G('cw-notes', [T(-3.5, -1.5, 3, PAINT, '♪', 'cw-note cw-n1'), T(15.5, -3, 3.4, PAINT, '♫', 'cw-note cw-n2')]),
   G('cw-glugs', [C(11.4, 1.6, 0.4, '#d6ecfb', 'cw-glug'), C(12.6, 0.6, 0.32, '#d6ecfb', 'cw-glug cw-g2'), C(13.6, -0.4, 0.28, '#d6ecfb', 'cw-glug cw-g3')]),
@@ -306,7 +315,7 @@ export const CLAWD_CSS = `
 .cw-al { transform-origin: 2px 5px; }
 .cw-ar { transform-origin: 14px 5px; }
 .cw-prop, .cw-lprop, .cw-hat, .cw-over, .cw-front, .cw-bubble, .cw-heart, .cw-sweat,
-.cw-notes, .cw-glugs, .cw-glints, .cw-sparks, .cw-zap { display: none; }
+.cw-notes, .cw-glugs, .cw-glints, .cw-sparks, .cw-zap, .cw-cloud, .cw-tears { display: none; }
 ${showCss}
 
 @keyframes cw-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-0.5px); } }
@@ -457,6 +466,20 @@ ${showCss}
 .m-throw .cw-ar { animation: cw-throw .45s cubic-bezier(.5, 0, .9, .4) forwards; }
 .m-throw .cw-water-air { transform-origin: 16px -3px; transform: scaleY(3.6); }
 .m-throw .cw-look { animation: none; transform: translate(1px, -1px); }
+
+/* the page broke: rain cloud, tears, droopy everything */
+@keyframes cw-rainfall { 0% { opacity: 0; transform: translateY(0); } 20% { opacity: 1; } 100% { opacity: 0; transform: translateY(4px); } }
+@keyframes cw-cry { 0% { opacity: 0; transform: translateY(0); } 25% { opacity: 1; } 100% { opacity: 0; transform: translateY(3.5px); } }
+@keyframes cw-mope { 0%, 100% { transform: translateY(.8px) rotate(-2deg); } 50% { transform: translateY(1px) rotate(2deg); } }
+.m-sad .cw-cloud, .m-sad .cw-tears { display: inline; }
+.m-sad .cw-all { animation: cw-mope 2.4s ease-in-out infinite; }
+.m-sad .cw-arm { transform: translateY(1.5px); }
+.m-sad .cw-look { animation: none; transform: translateY(1px); }
+.m-sad .cw-eyes { animation: none; transform: scaleY(.45); }
+.cw-rain { animation: cw-rainfall .7s linear infinite; }
+.cw-r2 { animation-delay: .25s; } .cw-r3 { animation-delay: .5s; }
+.cw-tear { animation: cw-cry 1.1s ease-in infinite; }
+.cw-t2 { animation-delay: .55s; }
 
 /* tickled: giggles and wiggles */
 @keyframes cw-giggle { 0%, 100% { transform: rotate(-7deg); } 50% { transform: rotate(7deg) translateY(-.5px); } }

@@ -50,6 +50,9 @@ document.body.innerHTML = `
     <label class="cm-switch"><input type="checkbox" id="live"><span class="track"></span><span id="live-label">Live Clawd on localhost</span></label>
     <a id="mute" hidden></a>
   </div>
+  <div class="live">
+    <label class="cm-switch"><input type="checkbox" id="sound"><span class="track"></span><span>Clawd’s sound effects</span></label>
+  </div>
   <div class="foot">
     <span id="toggle-slot"></span>
     <span class="sp"></span>
@@ -136,6 +139,11 @@ async function loadLive() {
   };
 }
 loadLive().catch(() => {});
+
+sendCmdDirectly('ClawdSoundGet').then(st => {
+  $('sound').checked = !!st.enabled;
+  $('sound').onchange = e => sendCmdDirectly('ClawdSoundSet', { enabled: e.target.checked });
+}).catch(() => {});
 
 $('dash').addEventListener('click', () => {
   browser.runtime.openOptionsPage();

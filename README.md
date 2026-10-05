@@ -7,6 +7,10 @@
 > subscription via a native-messaging bridge — see [`bridge/`](bridge/)). Setup and usage
 > instructions are in [SETUP.md](SETUP.md). All credit for the underlying userscript engine
 > goes to the Violentmonkey authors; the original README follows.
+>
+> The `local` branch is **Clawdify**: a rebranded ClaudeMonkey with an animated Clawd mascot,
+> approval-gated browser tools, and *Live Clawd* for Claude Code sessions on localhost dev
+> servers — see [SETUP.md → Clawdify](SETUP.md#clawdify-this-fork).
 
 ---
 

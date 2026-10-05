@@ -5,6 +5,7 @@ import { handleHotkeyOrMenu } from './utils/icon';
 import { addPublicCommands, commands, init } from './utils';
 import './utils/ai';
 import './utils/live';
+import './utils/sounds';
 import './sync';
 import './utils/clipboard';
 import './utils/cookies';
