@@ -374,9 +374,11 @@ installs dig through a parcel, git push/pull flings paper planes, background com
 (`run_in_background`) wind a kitchen timer. Tests, lint, builds, installs and syncs end
 in a fist pump or facepalm: the bridge counts `PostToolUseFailure`, or failure summaries
 at the end of the output (`pnpm test | tail` exits 0), as failed. Thinking for 12s+ (after a
-prompt, or between tools) moves him to a chalkboard. Subagents: a mini Clawd with the
-agent type walks off-screen and comes back with a parcel; a subagent's own tool calls
-are ignored. Compaction runs a trash compactor. The overlay remembers ended tool ids for
+prompt, or between tools) moves him to a chalkboard, which stays put while he paces. Subagents: a baby Clawd labelled with
+the agent type toddles out to a spot left of Clawd's resting place (bottom right) and
+acts out its subagent's own tool calls there (wobbling, a lazy eye, the odd tumble),
+then carries a parcel back to Clawd when it stops; the others close up. Clawd won't
+walk off while babies are out (a silent one goes home after 15 min). Compaction runs a trash compactor. The overlay remembers ended tool ids for
 30s, because an `end` (sent straight through) can beat its own paced `act`. During a
 permission reminder a held action is set aside and resumes after it.
 
@@ -392,7 +394,9 @@ spins all the way.
 
 > **Gotcha:** the build transpiles `for…of` in loose mode (index loop over `.length`), so
 > never iterate a Map/Set iterator directly: write `for (const c of [...clawds.values()])`.
-> A bare `clawds.values()` loop silently runs zero times (this was the sad-caption bug).
+> A bare `clawds.values()` loop silently runs zero times (this was the sad-caption bug;
+> also, in the background bundle, Live Clawd's replay-on-tab-switch, and failing jobs or
+> pending approvals when the bridge disconnects).
 
 ### Changes outside this repo
 

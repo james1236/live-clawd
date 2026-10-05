@@ -145,7 +145,7 @@ function ensurePort() {
     const err = browser.runtime.lastError;
     const emsg = (err && err.message) || 'Native bridge disconnected. Is it installed? See bridge/install.sh';
     // Unblock any pass waiting on `done`, and fail any still-running jobs.
-    for (const job of jobs.values()) {
+    for (const job of [...jobs.values()]) {
       const resolve = job._resolveDone;
       job._resolveDone = null;
       if (resolve) { resolve({ error: emsg }); continue; }
@@ -707,7 +707,7 @@ async function finalize(job, res) {
     clawd(job, { op: 'done' });
   }
   // Anything still waiting for the user's OK is moot now.
-  for (const answer of (job.approvals || new Map()).values()) answer(false);
+  for (const answer of [...(job.approvals || new Map()).values()]) answer(false);
   broadcast(job, { type: 'done', error: job.error, script: job.script });
 }
 

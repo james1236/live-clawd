@@ -98,6 +98,11 @@ function toOverlay(ev) {
     color: colorFor(win, ev.session),
     live: true,
   };
+  if (ev.sub) {
+    // A subagent's tool call: its baby Clawd acts it out (and goes back to idling after).
+    const a = ev.event === 'PreToolUse' ? classifyTool(ev.tool, ev.detail, ev.file || '') : { kind: 'idle' };
+    return { ...base, op: 'helper', agentId: ev.agentId, kind: a.kind };
+  }
   switch (ev.event) {
   case 'Clawd':
     return {
@@ -269,7 +274,7 @@ async function replay(tab) {
   if (!settings.enabled || !tab || !tab.active) return;
   const o = originOf(tab.url);
   if (!o || settings.muted.includes(o.origin) || busyTabIds().has(tab.id)) return;
-  for (const s of sessions.values()) {
+  for (const s of [...sessions.values()]) {
     if (s.last && Date.now() - s.at < RECENT_MS && s.ports.includes(o.port)) deliver(tab.id, s.last);
   }
 }
@@ -290,7 +295,7 @@ browser.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (info.status === 'complete') replay(tab);
 });
 browser.tabs.onRemoved.addListener(tabId => {
-  for (const key of lanes.keys()) if (key.startsWith(`${tabId}|`)) lanes.delete(key);
+  for (const key of [...lanes.keys()]) if (key.startsWith(`${tabId}|`)) lanes.delete(key);
 });
 
 async function setEnabled(enabled) {

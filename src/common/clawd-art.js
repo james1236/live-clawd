@@ -608,6 +608,9 @@ ${showCss}
 @keyframes cw-pace { 0%, 100% { transform: translateX(-2px); } 50% { transform: translateX(2px); } }
 @keyframes cw-chalk { 0% { opacity: 0; } 8%, 92% { opacity: 1; } 100% { opacity: 0; } }
 .m-ponder .cw-all { animation: cw-pace 4s ease-in-out infinite; }
+/* ...while the board (inside the same group) stands still: the exact opposite motion */
+@keyframes cw-unpace { 0%, 100% { transform: translateX(2px); } 50% { transform: translateX(-2px); } }
+.m-ponder .cw-b-board { animation: cw-unpace 4s ease-in-out infinite; }
 .m-ponder .cw-l1, .m-ponder .cw-l3 { animation: cw-step .5s steps(2) infinite; }
 .m-ponder .cw-l2, .m-ponder .cw-l4 { animation: cw-step .5s steps(2) -.25s infinite; }
 .m-ponder .cw-ar { transform: translate(-4px, 0); }

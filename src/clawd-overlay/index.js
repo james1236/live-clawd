@@ -89,6 +89,14 @@ function install() {
   transition-property: transform, opacity; transition-timing-function: linear; will-change: transform;
   filter: drop-shadow(0 1px 1px rgba(0,0,0,.25)); }
 .mini.gone { opacity: 0; transition-duration: .4s !important; }
+/* babies: toddle, wobble, a lazy eye, and the odd tumble */
+@keyframes toddle { 0%, 100% { transform: rotate(-6deg); } 50% { transform: rotate(6deg) translateY(-1px); } }
+@keyframes plop { 0% { transform: none; } 25% { transform: rotate(-75deg) translate(-4px, 6px); }
+  70% { transform: rotate(-75deg) translate(-4px, 6px); } 100% { transform: none; } }
+.derp { position: absolute; inset: 0; transform-origin: 50% 85%; animation: toddle 1.3s ease-in-out infinite; }
+.derp.plop { animation: plop 1.4s cubic-bezier(.3, 1.4, .5, 1) 1; }
+.mini .cw-eyes rect:first-child { transform: translate(-.3px, .7px); }
+.mini .cw-eyes rect:last-child { transform: scale(1.3); transform-origin: 10.5px 3px; }
 .minitag { position: absolute; left: 50%; top: calc(100% + 1px); transform: translateX(-50%); white-space: nowrap;
   font-size: 9px; font-weight: 600; color: #faf9f5; background: var(--clawd); border-radius: 6px; padding: 0 5px; opacity: .9; }
 .minitag:empty { display: none; }
@@ -681,7 +689,10 @@ ${CLAWD_CSS}`;
     c.fx.replaceChildren();
     if (step && step.cover) reveal(c, step, 'fade');
     if (step) c.idleMood = step.kind === 'done' || step.kind === 'error' ? step.kind : 'idle';
-    if (!c.queue.length && c.endAfterQueue) {
+    if (!c.queue.length && c.endAfterQueue && c.helpers.size) {
+      c.waitBabies = true; // not without the babies still out working
+      setLabel(c, '');
+    } else if (!c.queue.length && c.endAfterQueue) {
       c.leaving = true;
       setLabel(c, c.idleMood === 'error' ? '' : 'Bye!');
     } else if (!c.queue.length) {
@@ -867,26 +878,34 @@ ${CLAWD_CSS}`;
     c.queue.splice(at + 1, 0, react); // right after it (at -1: it's the current one)
   }
 
-  /** A mini Clawd of the same colour, for a subagent. */
+  // --- Subagents: baby Clawds lined up left of where he rests, acting out their tasks --
+  const BABY_GAP = 8; // px between babies
+  const BABY_IDLE_MS = 15 * 60000; // a baby nobody's heard from in this long goes home
+
+  /** A baby Clawd of the same colour, for a subagent. */
   function makeMini(c, label) {
     const node = el('div', 'mini', layer);
     node.style.setProperty('--clawd', c.color || '#d97757');
     const turn = el('div', 'turn', node);
+    const derp = el('div', 'derp', turn); // toddling, wobbles and tumbles
     const svg = clawdSpriteNode(document, MINI_W);
-    turn.appendChild(svg);
+    derp.appendChild(svg);
     el('div', 'minitag', node, label || '');
-    return { node, turn, svg };
+    return {
+      node, turn, derp, svg, kind: 'idle', walking: false, nextPlop: 0, seen: performance.now(),
+    };
   }
 
   const MINI_FEET = (10 - VIEWBOX.y) * MINI_W / VIEWBOX.w;
 
-  /** Walk a mini from where it is to (x, y) — its feet — then call `done`. */
+  /** Walk a baby from where it is to (x, y) — its feet — then call `done`. */
   function walkMini(h, x, y, mood, done) {
     const from = h.at || { x, y };
     const dist = Math.hypot(x - from.x, y - from.y);
     const secs = Math.max(0.3, dist / MINI_SPEED);
     h.turn.classList.toggle('flip', x < from.x);
     setMood(h.svg, mood);
+    h.walking = true;
     h.node.style.transitionDuration = '0s';
     h.node.style.transform = `translate(${Math.round(from.x - MINI_W / 2)}px, ${Math.round(from.y - MINI_FEET)}px)`;
     void h.node.offsetWidth; // start from there
@@ -894,44 +913,101 @@ ${CLAWD_CSS}`;
     h.node.style.transform = `translate(${Math.round(x - MINI_W / 2)}px, ${Math.round(y - MINI_FEET)}px)`;
     h.at = { x, y };
     clearTimeout(h.timer);
-    h.timer = setTimeout(done, secs * 1000 + 30);
+    h.timer = setTimeout(() => { h.walking = false; done(); }, secs * 1000 + 30);
   }
 
-  /** A subagent starts (a mini Clawd heads off-screen) or finishes (it brings the results back). */
+  /** Where Clawd's feet go when he's resting (no target): bottom right. */
+  function restSpot(c) {
+    const { w, h } = vp();
+    return { x: clamp(w - 70 - c.offset * 2, FOOT_X + 4, w - (SPRITE_W - FOOT_X) - 4), y: h - BELOW };
+  }
+
+  /** Where Clawd's feet are now (or will be). */
+  function feetOf(c) {
+    if (c.pos) return { x: c.pos.x + FOOT_X, y: c.pos.y + FOOT_Y };
+    const d = destination(c);
+    return { x: d.x + FOOT_X, y: d.y + FOOT_Y };
+  }
+
+  /** Line the babies up leftwards from Clawd's resting spot, facing him. */
+  function layoutBabies(c) {
+    const rest = restSpot(c);
+    let i = 0;
+    for (const h of [...c.helpers.values()]) {
+      if (h.returning) continue;
+      const x = Math.max(MINI_W / 2 + 2, rest.x - SPRITE_W / 2 - MINI_W / 2 - 4 - i++ * (MINI_W + BABY_GAP));
+      if (h.slot && h.slot.x === x && h.slot.y === rest.y) continue;
+      h.slot = { x, y: rest.y };
+      walkMini(h, x, rest.y, 'walk', () => {
+        h.turn.classList.remove('flip');
+        setMood(h.svg, h.kind);
+      });
+    }
+  }
+
+  /**
+   * A subagent: starts (a baby toddles out to its place), does something (acts out that
+   * tool call; 'idle' between them) or finishes (brings Clawd the results, then goes).
+   */
   function helper(c, msg) {
     const key = String(msg.agentId || '');
-    const { w } = vp();
-    // Where Clawd's feet are (or will be), and the nearer side of the screen to exit by.
-    const home = c.pos ? { x: c.pos.x + FOOT_X, y: c.pos.y + FOOT_Y } : (() => {
-      const d = destination(c);
-      return { x: d.x + FOOT_X, y: d.y + FOOT_Y };
-    })();
-    const edge = home.x < w / 2 ? -MINI_W : w + MINI_W;
-    if (msg.on) {
-      if (c.helpers.has(key)) return;
-      const h = makeMini(c, msg.label);
-      c.helpers.set(key, h);
-      h.at = { x: home.x + (edge < 0 ? -40 : 40), y: home.y };
-      sfx('pop');
-      walkMini(h, edge, home.y, 'walk', () => { h.node.style.visibility = 'hidden'; });
+    let h = c.helpers.get(key);
+    if (msg.on === false) {
+      if (!h) return;
+      h.returning = true;
+      layoutBabies(c); // the others close up
+      const home = feetOf(c);
+      // Back with the results: parcel overhead, then a happy hop, then gone.
+      walkMini(h, home.x - SPRITE_W / 2 + 4, home.y, 'fetch', () => {
+        setMood(h.svg, 'done');
+        sfx('chime');
+        h.timer = setTimeout(() => {
+          h.node.classList.add('gone');
+          setTimeout(() => dropBaby(c, key), 450);
+        }, 1300);
+      });
       return;
     }
-    let h = c.helpers.get(key);
     if (!h) {
-      h = makeMini(c, msg.label);
+      h = makeMini(c, msg.on ? msg.label : '');
       c.helpers.set(key, h);
+      h.at = feetOf(c); // toddles out from Clawd
+      sfx('pop');
+      layoutBabies(c);
     }
-    h.node.style.visibility = '';
-    h.at = { x: edge, y: home.y };
-    // Back with the results: parcel overhead, then a happy hop, then gone.
-    walkMini(h, home.x + (edge < 0 ? -44 : 44), home.y, 'fetch', () => {
-      setMood(h.svg, 'done');
-      sfx('chime');
-      h.timer = setTimeout(() => {
-        h.node.classList.add('gone');
-        setTimeout(() => { h.node.remove(); c.helpers.delete(key); }, 450);
-      }, 1300);
-    });
+    h.seen = performance.now();
+    if (msg.kind) {
+      h.kind = msg.kind;
+      if (!h.walking) setMood(h.svg, h.kind);
+    }
+  }
+
+  function dropBaby(c, key) {
+    const h = c.helpers.get(key);
+    if (h) { clearTimeout(h.timer); h.node.remove(); }
+    c.helpers.delete(key);
+    // He waited for them before heading off.
+    if (!c.helpers.size && c.waitBabies && c.endAfterQueue && !c.cur && !c.queue.length) {
+      c.waitBabies = false;
+      c.leaving = true;
+      setLabel(c, c.idleMood === 'error' ? '' : 'Bye!');
+    }
+  }
+
+  /** Every frame: babies now and then trip over; forgotten ones go home. */
+  function tickBabies(c, now) {
+    for (const [key, h] of [...c.helpers]) {
+      if (h.returning) continue;
+      if (now - h.seen > BABY_IDLE_MS) { dropBaby(c, key); continue; }
+      if (!h.nextPlop) h.nextPlop = now + 6000 + Math.random() * 10000;
+      if (now > h.nextPlop && !h.walking) {
+        h.nextPlop = now + 8000 + Math.random() * 14000;
+        h.derp.classList.remove('plop');
+        void h.derp.offsetWidth;
+        h.derp.classList.add('plop');
+        setTimeout(() => sfx('squeak'), 350);
+      }
+    }
   }
 
   function tick(now) {
@@ -939,7 +1015,10 @@ ${CLAWD_CSS}`;
     const dt = Math.min(0.05, (now - lastT) / 1000);
     lastT = now;
     if ([...clawds.values()].some(c => c.live)) checkBroken(now);
-    for (const c of [...clawds.values()]) update(c, now, dt);
+    for (const c of [...clawds.values()]) {
+      update(c, now, dt);
+      if (c.helpers.size) tickBabies(c, now);
+    }
   }
 
   /** Effects drawn over the element being worked on, by kind of change. */

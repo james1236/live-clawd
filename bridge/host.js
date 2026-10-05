@@ -576,8 +576,21 @@ function relayLive(ev) {
     sendMessage(out);
     return;
   }
-  // A subagent's own tool calls: its mini Clawd is off-screen, the main one stays put.
-  if (ev.agent_id && /ToolUse/.test(ev.hook_event_name || '')) return;
+  // A subagent's own tool calls: its baby Clawd acts them out; the main one stays put.
+  if (ev.agent_id && /ToolUse/.test(ev.hook_event_name || '')) {
+    out.agentId = String(ev.agent_id);
+    out.sub = true;
+    if (ev.hook_event_name === 'PreToolUse') {
+      const input = ev.tool_input || {};
+      out.tool = ev.tool_name;
+      out.detail = toolDetail({ name: ev.tool_name, input });
+      if (input.file_path) out.file = path.relative(root, String(input.file_path));
+    } else {
+      out.event = 'PostToolUse';
+    }
+    sendMessage(out);
+    return;
+  }
   if (ev.hook_event_name === 'PostToolUse' || ev.hook_event_name === 'PostToolUseFailure') {
     // Ends the action that's been showing since PreToolUse (and says how it went).
     out.event = 'PostToolUse';
